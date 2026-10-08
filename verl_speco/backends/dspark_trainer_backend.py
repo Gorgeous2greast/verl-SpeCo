@@ -1124,12 +1124,14 @@ class DSparkTrainerBackend(DFlashTrainerBackend):
                 item_loss_mask = torch.zeros_like(ids, dtype=torch.float32)
                 item_loss_mask[:] = 1.0
 
-            if not (ids.size(0) == full_h.size(0) == item_loss_mask.size(0)):
-                raise ValueError(
-                    "DSpark input/hidden/mask row mismatch: "
-                    f"input_rows={ids.size(0)}, hidden_rows={full_h.size(0)}, "
-                    f"mask_rows={item_loss_mask.size(0)}"
-                )
+            # SFT path: hidden states are collected for positions whose NEXT token
+            # is a response token (left-shifted loss_mask), so hidden_rows may be
+            # one less than input_ids. Truncate to the common length instead of
+            # raising, matching the original working implementation.
+            valid_len = min(ids.size(0), full_h.size(0), item_loss_mask.size(0))
+            ids = ids[:valid_len]
+            full_h = full_h[:valid_len]
+            item_loss_mask = item_loss_mask[:valid_len]
             if max_window is None:
                 start, end = 0, ids.size(0)
             else:

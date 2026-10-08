@@ -3741,8 +3741,14 @@ class DrafterBaseTrainer:
         min_items_for_batch = 1
 
         use_logits = bool(self.config.rollout.drafter.training.get("use_logits", False))
+        # [SFT-CoTrain] 允许跨 step 复用 hidden（SFT 设 True，PPO 默认 False）
+        allow_cross_step_hidden = bool(
+            self.config.rollout.drafter.training.get("allow_cross_step_hidden", False)
+        )
         same_step_target_head_required = (
-            self.backend.model_type == "eagle3" and not use_logits
+            self.backend.model_type == "eagle3"
+            and not use_logits
+            and not allow_cross_step_hidden
         )
 
         # Determine data source: DataBuffer (cross-step) or collected_data (current step only).
@@ -5411,7 +5417,14 @@ class DrafterBaseTrainer:
         if self.skip_heavy_cleanup_after_drafter_training:
             if clear_data:
                 self.collected_data.clear()
-                self.data_buffer.clear()
+                # [SFT-CoTrain] SFT 跨 step 复用 hidden 时保留 data_buffer
+                allow_cross = bool(
+                    self.config.rollout.drafter.training.get(
+                        "allow_cross_step_hidden", False
+                    )
+                )
+                if not allow_cross:
+                    self.data_buffer.clear()
                 self._mark_buffer_changed()
             self._training_initialized = False
             self._training_active = False
