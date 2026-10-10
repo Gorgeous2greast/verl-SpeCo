@@ -10,6 +10,9 @@ hydra:
   searchpath:
     - pkg://verl.trainer.config
 
+# 实验类型：cotrain（SFT + drafter 联训）或 sft_only（纯 SFT）
+experiment_type: cotrain
+
 # ========== 清空 verl 继承的默认值，让 run_sft_co_train.py 的脚本常量作为 fallback ==========
 # CLI 传入时仍以 CLI 为准；未传入时使用脚本中的常量
 model:

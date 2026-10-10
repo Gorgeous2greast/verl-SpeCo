@@ -200,16 +200,24 @@ def main(config):
 
     with open_dict(config.speco):
         config.speco.mode = "sft"
-        config.speco.sft_specific = OmegaConf.create(
-            {
-                "enable_drafter_training": enable_co_train,
-                "drafter_train_interval": 5,
-                "max_samples_per_step": 200,
-                "hidden_layer_id": -1,
-                "publish_during_sft": False,
-                "checkpoint_save_dir": f"checkpoints/sft_{experiment_type}_{EXPERIMENT_TIMESTAMP}/drafter",
-            }
-        )
+        # 保留用户已传入的 sft_specific 字段，仅对缺失字段设置默认值
+        if (
+            not hasattr(config.speco, "sft_specific")
+            or config.speco.sft_specific is None
+        ):
+            config.speco.sft_specific = OmegaConf.create({})
+        sft_specific = config.speco.sft_specific
+        defaults = {
+            "enable_drafter_training": enable_co_train,
+            "drafter_train_interval": 5,
+            "max_samples_per_step": 200,
+            "hidden_layer_id": -1,
+            "publish_during_sft": False,
+            "checkpoint_save_dir": f"checkpoints/sft_{experiment_type}_{EXPERIMENT_TIMESTAMP}/drafter",
+        }
+        for key, value in defaults.items():
+            if not hasattr(sft_specific, key) or getattr(sft_specific, key) is None:
+                setattr(sft_specific, key, value)
 
     print("=" * 60)
     print(f"SPECO SFT - Experiment: {experiment_type}")
