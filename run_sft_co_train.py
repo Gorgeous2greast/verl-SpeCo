@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """SFT Co-Train 独立运行入口。
 
 使用方式：
@@ -13,13 +12,20 @@
     - 验证集：1319 条
 """
 
+import os
+import sys
+
+import hydra
+
 # ==================== 实验配置（修改此处即可）====================
 EXPERIMENT_TYPE = "cotrain"  # "sft_only" 或 "cotrain"
 SPECULATIVE_ALGORITHM = "EAGLE3"  # "EAGLE3" / "DSPARK" / "DFLASH"
 EXPERIMENT_TIMESTAMP = "20260831"
 
 # 数据集路径
-TRAIN_DATA_PATH = "/model/sft_cotrain/verl-SpeCo/data/gsm8k_dapo_merged_train_sft.parquet"
+TRAIN_DATA_PATH = (
+    "/model/sft_cotrain/verl-SpeCo/data/gsm8k_dapo_merged_train_sft.parquet"
+)
 VAL_DATA_PATH = "/model/sft_cotrain/verl-SpeCo/data/gsm8k_dapo_merged_test_sft.parquet"
 
 # 模型路径
@@ -34,19 +40,17 @@ MAX_TOKEN_LEN_PER_GPU = 4096
 
 # 保存/测试频率
 SAVE_FREQ = 50  # 每50步保存1次
-TEST_FREQ = 25   # 每25步测试1次
+TEST_FREQ = 25  # 每25步测试1次
 
 # GPU 配置
 N_GPUS_PER_NODE = 1  # 单卡验证
 N_NODES = 1
 # ================================================================
 
-import sys
-import os
 # os.environ["WANDB_DISABLED"] = "true"
 # ========== 关键：添加所有需要的路径 ==========
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-VERL_ROOT = "/model/sft_cotrain/verl"
+VERL_ROOT = os.environ.get("VERL_ROOT", "/model/sft_cotrain/verl")
 SPECO_ROOT = SCRIPT_DIR
 
 if VERL_ROOT not in sys.path:
@@ -65,26 +69,28 @@ SPECO_CONFIG_DIR = os.path.join(SPECO_ROOT, "verl_speco", "config")
 print(f"[DEBUG] VERL_CONFIG_DIR = {VERL_CONFIG_DIR}")
 print(f"[DEBUG] exists: {os.path.exists(VERL_CONFIG_DIR)}")
 
-import hydra
-from omegaconf import OmegaConf
 
-@hydra.main(config_path=SPECO_CONFIG_DIR, config_name="speco_sft_trainer", version_base=None)
+@hydra.main(
+    config_path=SPECO_CONFIG_DIR, config_name="speco_sft_trainer", version_base=None
+)
 def main(config):
     """SFT Co-Train 主入口。"""
-    import ray
     import logging
-    
+
+    import ray
+
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     logger = logging.getLogger(__name__)
-    
-    from verl.utils.device import auto_set_device
-    from verl.utils import hf_processor, hf_tokenizer
+
     from verl.trainer.sft_trainer_ray import create_sft_dataset
-    from verl_speco.trainer.speco_sft_trainer import SpecoRaySFTRayTrainer
+    from verl.utils import hf_processor, hf_tokenizer
+    from verl.utils.device import auto_set_device
+
     from verl_speco.integration.compat import check_compatible_verl
+    from verl_speco.trainer.speco_sft_trainer import SpecoRaySFTRayTrainer
 
     check_compatible_verl()
     auto_set_device(config)
@@ -98,20 +104,30 @@ def main(config):
 
     # ========== 路径映射：speco_base.yaml 的 drafter 配置在 actor_rollout_ref.rollout.drafter，
     # SFT 代码读取 config.rollout.drafter，在此桥接 ==========
-    if hasattr(config, "actor_rollout_ref") and hasattr(config.actor_rollout_ref, "rollout"):
+    if hasattr(config, "actor_rollout_ref") and hasattr(
+        config.actor_rollout_ref, "rollout"
+    ):
         with open_dict(config):
             if not hasattr(config, "rollout"):
                 config.rollout = OmegaConf.create({})
             config.rollout.drafter = config.actor_rollout_ref.rollout.drafter
-            print(f"[SFT-CONFIG] Bridged actor_rollout_ref.rollout.drafter -> rollout.drafter")
-            print(f"[SFT-CONFIG] speculative_algorithm = {config.rollout.drafter.speculative_algorithm}")
+            print(
+                "[SFT-CONFIG] Bridged actor_rollout_ref.rollout.drafter -> rollout.drafter"
+            )
+            print(
+                f"[SFT-CONFIG] speculative_algorithm = {config.rollout.drafter.speculative_algorithm}"
+            )
 
     # ========== 基础配置（CLI 优先，常量作为 fallback）==========
     # speco_sft_trainer.yaml 中已将这些字段置 null，确保脚本常量生效
     # expanduser 处理 ~ 路径（transformers 不会自动展开 ~）
     config.model.path = os.path.expanduser(config.model.get("path", None) or MODEL_PATH)
-    config.data.train_files = os.path.expanduser(config.data.get("train_files", None) or TRAIN_DATA_PATH)
-    config.data.val_files = os.path.expanduser(config.data.get("val_files", None) or VAL_DATA_PATH)
+    config.data.train_files = os.path.expanduser(
+        config.data.get("train_files", None) or TRAIN_DATA_PATH
+    )
+    config.data.val_files = os.path.expanduser(
+        config.data.get("val_files", None) or VAL_DATA_PATH
+    )
     config.data.train_max_samples = config.data.get("train_max_samples", None) or -1
     config.data.ignore_input_ids_mismatch = True  # Qwen Thinking 模板需要忽略拼接差异
     config.data.num_workers = config.data.get("num_workers", None) or 0

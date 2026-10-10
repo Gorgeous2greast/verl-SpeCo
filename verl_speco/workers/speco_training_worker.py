@@ -30,7 +30,6 @@ import os
 import types
 
 import torch
-
 from verl.single_controller.base.decorator import Dispatch, register
 from verl.utils import tensordict_utils as tu
 from verl.workers.engine_workers import TrainingWorker
@@ -46,6 +45,7 @@ def _direct_patch_engine_instance(engine) -> bool:
     """
     try:
         import importlib
+
         from verl_speco.integration.oldlogprob_runtime import (
             OLD_LOGPROB_COLLECT_MASK_KEY,
             OLD_LOGPROB_HIDDEN_CHUNK_META_KEY,
@@ -53,7 +53,7 @@ def _direct_patch_engine_instance(engine) -> bool:
             OLD_LOGPROB_HIDDEN_REF_META_KEY,
             OLD_LOGPROB_HIDDEN_REFS_KEY,
             OLD_LOGPROB_HIDDEN_STATES_KEY,
-            _cleanup_oldlogprob_hidden_capture,
+            OLD_LOGPROB_SAMPLE_INDICES_KEY,
             _consume_oldlogprob_hidden_capture,
             _install_oldlogprob_fsdp_batch_postprocess_patch,
             _install_oldlogprob_hidden_hooks,
@@ -107,6 +107,24 @@ def _direct_patch_engine_instance(engine) -> bool:
 
                 if _oldlogprob_hidden_object_ref_enabled(micro_batch):
                     hidden_output = _put_oldlogprob_hidden_refs(hidden_output, micro_batch)
+                    # Stamp each ref meta with the sample's original batch index.
+                    # Dynamic micro-batching may reorder samples, so the list
+                    # order of refs/metas no longer matches the original batch.
+                    # The driver maps by meta["batch_idx"] rather than list index.
+                    sample_indices = micro_batch.get(OLD_LOGPROB_SAMPLE_INDICES_KEY)
+                    if sample_indices is not None:
+                        metas = hidden_output.get(OLD_LOGPROB_HIDDEN_REF_META_KEY)
+                        if isinstance(metas, list):
+                            indices_list = (
+                                sample_indices.detach().cpu().reshape(-1).tolist()
+                                if hasattr(sample_indices, "detach")
+                                else list(sample_indices)
+                            )
+                            for mb_pos, meta in enumerate(metas):
+                                if meta is None:
+                                    continue
+                                if mb_pos < len(indices_list):
+                                    meta["batch_idx"] = int(indices_list[mb_pos])
                 else:
                     hidden_output = {k: v for k, v in hidden_output.items() if v is not None}
 

@@ -58,7 +58,11 @@ actor_rollout_ref:
         use_data_buffer: true
         data_buffer_max_size: 50000
         sample_last_n_steps: 10
-        allow_cross_step_hidden: true  # SFT 允许跨 step 复用 hidden
+        # Cross-step hidden reuse is disabled: old buffered hidden states were
+        # produced by an older actor lm_head. Reconstructing target logits with
+        # the current (updated) head yields head_vN(hidden_vM) != head_vM(hidden_vM),
+        # silently corrupting drafter supervision. Keep same-step only.
+        allow_cross_step_hidden: false
         skip_heavy_cleanup_after_drafter_training: true
         lr: 2e-5
         lr_warmup_steps: 0

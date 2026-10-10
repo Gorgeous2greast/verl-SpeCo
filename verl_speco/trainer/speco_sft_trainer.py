@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from functools import partial
 from typing import Any
 from uuid import uuid4
@@ -39,30 +38,32 @@ from uuid import uuid4
 import ray
 import torch
 from omegaconf import OmegaConf
-
-from verl.utils import tensordict_utils as tu
-from verl.utils.logger import log_with_rank
 from verl.trainer.sft_trainer_ray import SFTTrainer
+from verl.utils import tensordict_utils as tu
+from verl.utils.device import get_torch_device
+from verl.utils.logger import log_with_rank
 
 from verl_speco.integration.oldlogprob_layer_ids import (
     resolve_drafter_hidden_states_layout,
     resolve_oldlogprob_aux_layer_ids,
 )
 from verl_speco.integration.oldlogprob_runtime import (
-    OLD_LOGPROB_COLLECT_MASK_KEY,
-    OLD_LOGPROB_HIDDEN_POSITIONS_KEY,
-    OLD_LOGPROB_HIDDEN_POSITION_MASK_KEY,
-    OLD_LOGPROB_OWNER_RANK_KEY,
-    OLD_LOGPROB_HIDDEN_STATES_KEY,
-    OLD_LOGPROB_HIDDEN_REFS_KEY,
-    OLD_LOGPROB_HIDDEN_REF_META_KEY,
-    OLD_LOGPROB_HIDDEN_CHUNK_REFS_KEY,
-    OLD_LOGPROB_HIDDEN_CHUNK_META_KEY,
     OLD_LOGPROB_AUX_LAYER_IDS_KEY,
-    OLD_LOGPROB_HIDDEN_OBJECT_REF_KEY,
+    OLD_LOGPROB_COLLECT_MASK_KEY,
     OLD_LOGPROB_HIDDEN_CAPTURE_IMPL_KEY,
+    OLD_LOGPROB_HIDDEN_CHUNK_META_KEY,
+    OLD_LOGPROB_HIDDEN_CHUNK_REFS_KEY,
     OLD_LOGPROB_HIDDEN_LAYOUT_KEY,
+    OLD_LOGPROB_HIDDEN_OBJECT_REF_KEY,
+    OLD_LOGPROB_HIDDEN_POSITION_MASK_KEY,
+    OLD_LOGPROB_HIDDEN_POSITIONS_KEY,
+    OLD_LOGPROB_HIDDEN_REF_META_KEY,
+    OLD_LOGPROB_HIDDEN_REFS_KEY,
+    OLD_LOGPROB_HIDDEN_STATES_KEY,
+    OLD_LOGPROB_OWNER_RANK_KEY,
+    OLD_LOGPROB_SAMPLE_INDICES_KEY,
 )
+from verl_speco.workers.speco_worker import SpecoWorker
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_SPECO_LOGGING_LEVEL", "WARN"))
@@ -617,7 +618,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         SFT 模式下不需要 route mapping（用 config 推断 GPU 数），
         直接返回 None。
         """
-        return None
+        return
 
     def _speco_build_sft_collect_plan(self, batch) -> dict[str, Any] | None:
         """构建 SFT 版的 collect plan。
@@ -771,7 +772,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             hidden_refs = tu.get(output, OLD_LOGPROB_HIDDEN_REFS_KEY)
             hidden_ref_meta = tu.get(output, OLD_LOGPROB_HIDDEN_REF_META_KEY)
             chunk_refs = tu.get(output, OLD_LOGPROB_HIDDEN_CHUNK_REFS_KEY)
-            chunk_meta = tu.get(output, OLD_LOGPROB_HIDDEN_CHUNK_META_KEY)
+            _chunk_meta = tu.get(output, OLD_LOGPROB_HIDDEN_CHUNK_META_KEY)
 
             # 也尝试直接获取 hidden_states
             hidden_states = tu.get(output, OLD_LOGPROB_HIDDEN_STATES_KEY)
@@ -1078,7 +1079,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 # 发送到 SpecoWorker
                 # buckets 已经是 list[list[dict]] 格式，与 PPO 模式一致
                 logger.warning(f"[_speco_collect_sft_features] Sending {len(buckets)} buckets with {collected_count} samples")
-                result = self.speco_collect_rollout_features(buckets)
+                self.speco_collect_rollout_features(buckets)
 
                 # 更新统计
                 self._speco_last_sft_collected_samples = collected_count
@@ -1118,9 +1119,14 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         because FSDPEngineWithLMHead runs in separate Ray worker processes.
         Using SpecoTrainingWorker ensures the patch is installed in each worker.
         """
+        from verl.single_controller.ray import (
+            RayClassWithInitArgs,
+            RayResourcePool,
+            RayWorkerGroup,
+        )
         from verl.workers.engine_workers import TrainingWorkerConfig
         from verl.workers.utils.losses import sft_loss
-        from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
+
         from verl_speco.workers.speco_training_worker import SpecoTrainingWorker
         
         logger.info("[_build_engine] Using SpecoTrainingWorker with oldlogprob patch")
@@ -1224,9 +1230,9 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         4. 收集 features
         5. 按间隔触发 drafter 训练
         """
-        from verl.utils.tracking import Tracking
         from tensordict.tensorclass import NonTensorData
         from tqdm import tqdm
+        from verl.utils.tracking import Tracking
         
         tracking = Tracking(
             project_name=self.config.trainer.project_name,
@@ -1316,6 +1322,13 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                     data[OLD_LOGPROB_HIDDEN_POSITIONS_KEY] = collect_plan["hidden_positions"]
                     data[OLD_LOGPROB_HIDDEN_POSITION_MASK_KEY] = collect_plan["hidden_position_mask"]
                     data[OLD_LOGPROB_OWNER_RANK_KEY] = collect_plan["owner_rank"]
+                    # Track original batch indices so the worker can restore
+                    # sample order after dynamic micro-batching reorders them.
+                    _input_ids = tu.get(data, key="input_ids")
+                    if _input_ids is not None:
+                        data[OLD_LOGPROB_SAMPLE_INDICES_KEY] = torch.arange(
+                            _input_ids.size(0), dtype=torch.long
+                        )
                     # 配置 ObjectRef 传递和 capture impl
                     tu.assign_non_tensor_data(data, OLD_LOGPROB_HIDDEN_CAPTURE_IMPL_KEY, "forward_hook")
                     tu.assign_non_tensor_data(data, OLD_LOGPROB_HIDDEN_OBJECT_REF_KEY, True)
@@ -1332,13 +1345,21 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         del data[OLD_LOGPROB_COLLECT_MASK_KEY]
 
                 if self.config.trainer.balance_batch:
-                    global_seqlen_lst = torch.Tensor([item.size()[0] for item in data["input_ids"]])
-                    global_seqlen_lst = calculate_workload(global_seqlen_lst)
-                    dp_size = max(self.training_client._query_dispatch_info("train")) + 1
-
-                    global_partition_lst = get_seqlen_balanced_partitions(
-                        global_seqlen_lst, k_partitions=dp_size, equal_size=True
-                    )
+                    try:
+                        from verl.utils.seqlen_balancing import (
+                            calculate_workload,
+                            get_seqlen_balanced_partitions,
+                        )
+                    except ImportError:
+                        calculate_workload = None
+                        get_seqlen_balanced_partitions = None
+                    if calculate_workload is not None and get_seqlen_balanced_partitions is not None:
+                        global_seqlen_lst = torch.Tensor([item.size()[0] for item in data["input_ids"]])
+                        global_seqlen_lst = calculate_workload(global_seqlen_lst)
+                        dp_size = max(self.training_client._query_dispatch_info("train")) + 1
+                        global_partition_lst = get_seqlen_balanced_partitions(
+                            global_seqlen_lst, k_partitions=dp_size, equal_size=True
+                        )
                     for idx, partition in enumerate(global_partition_lst):
                         partition.sort(key=lambda x: (global_seqlen_lst[x], x))
                         ordered_partition = partition[::2] + partition[1::2][::-1]
@@ -1346,6 +1367,13 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
                     global_idx = torch.tensor([j for partition in global_partition_lst for j in partition])
                     data = tu.index_select_tensor_dict(data, global_idx)
+                    # Reorder collect_plan tensors to match the reordered data
+                    # so token/hidden-position/owner mapping stays consistent.
+                    if collect_plan is not None:
+                        for _cp_key in ("collect_mask", "hidden_positions", "hidden_position_mask", "owner_rank"):
+                            _cp_val = collect_plan.get(_cp_key)
+                            if torch.is_tensor(_cp_val):
+                                collect_plan[_cp_key] = _cp_val[global_idx]
 
                 if global_step == self.start_profile_step:
                     self.training_client.start_profile()
@@ -1495,8 +1523,9 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 # === 新增：显存清理（关键！）===
                 import gc
                 gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                device_module = get_torch_device()
+                if hasattr(device_module, "is_available") and device_module.is_available():
+                    device_module.empty_cache()
                 # ==================================
 
                 is_last_step = global_step >= self.total_training_steps
