@@ -1,4 +1,3 @@
-
 # Copyright 2026 Bytedance Ltd. and/or its affiliates
 #
 
@@ -67,6 +66,7 @@ from verl_speco.workers.speco_worker import SpecoWorker
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_SPECO_LOGGING_LEVEL", "WARN"))
+
 
 class SpecoRaySFTRayTrainer(SFTTrainer):
     """SPECO adapter for verl SFT trainer.
@@ -190,7 +190,9 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             device_name=device_name,
         )
 
-        logger.info(f"SpecoWorker group created: world_size={self.drafter_wg.world_size}")
+        logger.info(
+            f"SpecoWorker group created: world_size={self.drafter_wg.world_size}"
+        )
 
         # 初始化模型（注册 dispatch info 在此期间发生）
         self.drafter_wg.init_model()
@@ -200,14 +202,19 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         # 在 _ensure_training_group_initialized() 中注册，该方法由 init_model() 调用）
         try:
             from verl_speco.workers.speco_worker import DRAFTER_OWNER_ROUTE_MESH
+
             mapping = self.drafter_wg._query_dispatch_info(DRAFTER_OWNER_ROUTE_MESH)
             if mapping:
                 self._speco_owner_count_cache = max(int(r) for r in mapping) + 1
-                logger.info(f"Drafter owner_route mesh dp_size={self._speco_owner_count_cache} (mapping={mapping})")
+                logger.info(
+                    f"Drafter owner_route mesh dp_size={self._speco_owner_count_cache} (mapping={mapping})"
+                )
             else:
                 self._speco_owner_count_cache = 1
         except Exception as e:
-            logger.warning(f"Failed to query owner_count from drafter_wg: {e}, defaulting to 1")
+            logger.warning(
+                f"Failed to query owner_count from drafter_wg: {e}, defaulting to 1"
+            )
             self._speco_owner_count_cache = 1
 
     def _require_speco_worker_group(self):
@@ -254,11 +261,15 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
     def speco_sync_target_lm_head_weight(self, payload, global_step=None):
         """代理到 SpecoWorker group 的 sync_target_lm_head_weight。"""
-        return self._require_speco_worker_group().sync_target_lm_head_weight(payload, global_step=global_step)
+        return self._require_speco_worker_group().sync_target_lm_head_weight(
+            payload, global_step=global_step
+        )
 
     def speco_get_drafter_target_lm_head_row_indices(self):
         """代理到 SpecoWorker group 的 get_drafter_target_lm_head_row_indices。"""
-        return self._require_speco_worker_group().get_drafter_target_lm_head_row_indices()
+        return (
+            self._require_speco_worker_group().get_drafter_target_lm_head_row_indices()
+        )
 
     def _speco_max_samples_per_step(self) -> int:
         """获取每个 step 最多收集的样本数。
@@ -274,20 +285,24 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         优先从 self.model_config 获取，其次从 self.config.model 获取。
         """
         num_hidden_layers = None
-        if hasattr(self, 'model_config'):
-            if hasattr(self.model_config, 'hf_config') and hasattr(self.model_config.hf_config, 'num_hidden_layers'):
+        if hasattr(self, "model_config"):
+            if hasattr(self.model_config, "hf_config") and hasattr(
+                self.model_config.hf_config, "num_hidden_layers"
+            ):
                 num_hidden_layers = self.model_config.hf_config.num_hidden_layers
-            elif hasattr(self.model_config, 'num_hidden_layers'):
+            elif hasattr(self.model_config, "num_hidden_layers"):
                 num_hidden_layers = self.model_config.num_hidden_layers
-            elif hasattr(self.model_config, 'text_config') and hasattr(self.model_config.text_config, 'num_hidden_layers'):
+            elif hasattr(self.model_config, "text_config") and hasattr(
+                self.model_config.text_config, "num_hidden_layers"
+            ):
                 num_hidden_layers = self.model_config.text_config.num_hidden_layers
         if num_hidden_layers is None:
-            model_cfg = getattr(self.config, 'model', None)
+            model_cfg = getattr(self.config, "model", None)
             if model_cfg is not None:
-                hf_cfg = getattr(model_cfg, 'hf_config', None)
-                if hf_cfg is not None and hasattr(hf_cfg, 'num_hidden_layers'):
+                hf_cfg = getattr(model_cfg, "hf_config", None)
+                if hf_cfg is not None and hasattr(hf_cfg, "num_hidden_layers"):
                     num_hidden_layers = hf_cfg.num_hidden_layers
-                elif hasattr(model_cfg, 'num_hidden_layers'):
+                elif hasattr(model_cfg, "num_hidden_layers"):
                     num_hidden_layers = model_cfg.num_hidden_layers
         return num_hidden_layers
 
@@ -295,9 +310,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         """根据 speculative_algorithm 动态解析 hidden states layout。"""
         drafter_cfg = self.config.rollout.drafter
         algorithm = str(getattr(drafter_cfg, "speculative_algorithm", "")).upper()
-        return resolve_drafter_hidden_states_layout(
-            algorithm, drafter_cfg.training
-        )
+        return resolve_drafter_hidden_states_layout(algorithm, drafter_cfg.training)
 
     def _speco_oldlogprob_aux_layer_ids(self) -> list[int]:
         """根据 speculative_algorithm 动态解析 target_layer_ids。
@@ -339,14 +352,18 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         num_hidden_layers = self._speco_get_num_hidden_layers()
 
         if num_hidden_layers is None:
-            logger.warning("Cannot determine num_hidden_layers, using default [2, 16, -3]")
+            logger.warning(
+                "Cannot determine num_hidden_layers, using default [2, 16, -3]"
+            )
             return [2, 16, -3]
 
         # EAGLE3 默认公式：[2, mid, -3]
         mid = max(1, num_hidden_layers // 2)
         last_minus_3 = max(0, num_hidden_layers - 3)
         aux_layer_ids = sorted(set([2, mid, last_minus_3]))
-        logger.info(f"Derived aux_layer_ids={aux_layer_ids} from num_hidden_layers={num_hidden_layers}")
+        logger.info(
+            f"Derived aux_layer_ids={aux_layer_ids} from num_hidden_layers={num_hidden_layers}"
+        )
         return aux_layer_ids
 
     def _speco_hidden_layer_id(self) -> int:
@@ -402,6 +419,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             训练结果
         """
         import ray as _ray
+
         wg = self._require_speco_worker_group()
 
         # 1. 读取 drafter 训练配置
@@ -415,8 +433,12 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         global_step = int(getattr(self, "global_steps", 0) or 0)
 
         # 2. 获取各 worker 的数据状态（用于构建 worker_snapshots）
-        logger.warning("[speco_train_drafter] Fetching training data status from workers...")
-        status_ref = wg.get_drafter_training_data_status(sample_last_n_steps, require_full_batch)
+        logger.warning(
+            "[speco_train_drafter] Fetching training data status from workers..."
+        )
+        status_ref = wg.get_drafter_training_data_status(
+            sample_last_n_steps, require_full_batch
+        )
         status_list = self._ray_get_if_needed(status_ref)
         if isinstance(status_list, dict):
             status_list = [status_list]
@@ -425,13 +447,22 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
         # 过滤出可用的 worker 状态
         available_statuses = [
-            s for s in status_list
-            if isinstance(s, dict) and s.get("available", False)
+            s for s in status_list if isinstance(s, dict) and s.get("available", False)
         ]
         if not available_statuses:
-            logger.warning("[speco_train_drafter] No workers with available training data, skipping")
-            return [{"trained": False, "triggered": False, "reason": "no_available_workers",
-                     "successful_steps": 0, "attempted_steps": 0, "elapsed_sec": 0.0}]
+            logger.warning(
+                "[speco_train_drafter] No workers with available training data, skipping"
+            )
+            return [
+                {
+                    "trained": False,
+                    "triggered": False,
+                    "reason": "no_available_workers",
+                    "successful_steps": 0,
+                    "attempted_steps": 0,
+                    "elapsed_sec": 0.0,
+                }
+            ]
 
         # 3. 构建 worker_snapshots（每个 rank 的 incarnation/buffer_version/data_version）
         worker_snapshots = {}
@@ -487,7 +518,8 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             preflight_results = []
 
         not_ready = [
-            r for r in preflight_results
+            r
+            for r in preflight_results
             if isinstance(r, dict) and not r.get("ready", False)
         ]
         if not_ready:
@@ -496,18 +528,32 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 f"[speco_train_drafter] Preflight not ready, reasons={reasons}, "
                 f"skipping train_drafter. Results: {not_ready}"
             )
-            return [{"trained": False, "triggered": False, "reason": f"preflight_failed:{reasons}",
-                     "successful_steps": 0, "attempted_steps": 0, "elapsed_sec": 0.0}]
+            return [
+                {
+                    "trained": False,
+                    "triggered": False,
+                    "reason": f"preflight_failed:{reasons}",
+                    "successful_steps": 0,
+                    "attempted_steps": 0,
+                    "elapsed_sec": 0.0,
+                }
+            ]
 
-        logger.warning("[speco_train_drafter] All workers ready, calling train_drafter()...")
+        logger.warning(
+            "[speco_train_drafter] All workers ready, calling train_drafter()..."
+        )
 
         # 6. 执行训练
         try:
             result_ref = wg.train_drafter(training_plan)
-            logger.warning(f"[speco_train_drafter] Worker group returned: {type(result_ref)}")
+            logger.warning(
+                f"[speco_train_drafter] Worker group returned: {type(result_ref)}"
+            )
 
             if isinstance(result_ref, list):
-                logger.warning(f"[speco_train_drafter] Waiting for {len(result_ref)} refs...")
+                logger.warning(
+                    f"[speco_train_drafter] Waiting for {len(result_ref)} refs..."
+                )
                 result = _ray.get(result_ref)
             else:
                 result = _ray.get(result_ref)
@@ -519,16 +565,21 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                     if isinstance(value, (int, float, str, bool)):
                         logger.warning(f"[speco_train_drafter] {key}: {value}")
             elif isinstance(result, list) and len(result) > 0:
-                logger.warning(f"[speco_train_drafter] List result length: {len(result)}")
+                logger.warning(
+                    f"[speco_train_drafter] List result length: {len(result)}"
+                )
                 if isinstance(result[0], dict):
                     for key, value in result[0].items():
                         if isinstance(value, (int, float, str, bool)):
-                            logger.warning(f"[speco_train_drafter] result[0].{key}: {value}")
+                            logger.warning(
+                                f"[speco_train_drafter] result[0].{key}: {value}"
+                            )
 
             return result
         except Exception as e:
             logger.error(f"[speco_train_drafter] ERROR: {e}")
             import traceback
+
             traceback.print_exc()
             raise
 
@@ -550,7 +601,9 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         Returns:
             保存结果
         """
-        return self._require_speco_worker_group().save_checkpoint(global_step, wait=wait)
+        return self._require_speco_worker_group().save_checkpoint(
+            global_step, wait=wait
+        )
 
     def speco_wait_checkpoint(self):
         """等待 checkpoint 保存完成。
@@ -580,12 +633,16 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         interval = self._speco_drafter_train_interval()
         if interval <= 0:
             if global_step <= 5:
-                logger.warning(f"[Drafter Trigger] Step {global_step}: interval={interval} <= 0, SKIP drafter training")
+                logger.warning(
+                    f"[Drafter Trigger] Step {global_step}: interval={interval} <= 0, SKIP drafter training"
+                )
             return False
-        
+
         should_train = global_step % interval == 0
         if global_step <= 5 or should_train:
-            logger.warning(f"[Drafter Trigger] Step {global_step}: interval={interval}, global_step % interval = {global_step % interval}, should_train={should_train}")
+            logger.warning(
+                f"[Drafter Trigger] Step {global_step}: interval={interval}, global_step % interval = {global_step % interval}, should_train={should_train}"
+            )
         return should_train
 
     def _speco_get_current_rank(self) -> int:
@@ -606,8 +663,8 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             return self._speco_owner_count_cache
         # Fallback: 当 drafter_wg 尚未初始化时（不常见）
         try:
-            n_gpus = int(self.config.trainer.get('n_gpus_per_node', 1))
-            nnodes = int(self.config.trainer.get('nnodes', 1))
+            n_gpus = int(self.config.trainer.get("n_gpus_per_node", 1))
+            nnodes = int(self.config.trainer.get("nnodes", 1))
             return max(n_gpus * nnodes, 1)
         except Exception:
             return 1
@@ -644,13 +701,17 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             # === 新增诊断 ===
             if not input_ids.is_nested and input_ids.size(0) <= 4:  # 只打印小 batch
                 for di in range(min(2, input_ids.size(0))):
-                    logger.warning(f"[LOSS-MASK-RAW] sample {di}: loss_mask={loss_mask[di][:30].tolist()}... sum={loss_mask[di].sum().item()}")
+                    logger.warning(
+                        f"[LOSS-MASK-RAW] sample {di}: loss_mask={loss_mask[di][:30].tolist()}... sum={loss_mask[di].sum().item()}"
+                    )
 
             # 获取配置
             max_samples = self._speco_max_samples_per_step()
 
             # 判断是否为 NestedTensor（use_remove_padding）
-            is_nested = input_ids.is_nested if hasattr(input_ids, 'is_nested') else False
+            is_nested = (
+                input_ids.is_nested if hasattr(input_ids, "is_nested") else False
+            )
 
             batch_size = input_ids.size(0)
 
@@ -669,11 +730,15 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         break
                     start = int(input_offsets[idx])
                     end = int(input_offsets[idx + 1])
-                    
+
                     # 使用 .values() 获取扁平存储后再切片
-                    loss_mask_flat = loss_mask.values() if hasattr(loss_mask, 'values') else loss_mask
-                    
-                    if hasattr(loss_mask, 'offsets'):
+                    loss_mask_flat = (
+                        loss_mask.values()
+                        if hasattr(loss_mask, "values")
+                        else loss_mask
+                    )
+
+                    if hasattr(loss_mask, "offsets"):
                         lm_offsets = loss_mask.offsets()
                         lm_start = int(lm_offsets[idx])
                         lm_end = int(lm_offsets[idx + 1])
@@ -707,9 +772,13 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             # collect_mask: (batch_size,) bool, 标记哪些样本需要收集
             collect_mask = torch.zeros(batch_size, dtype=torch.bool)
             # hidden_positions: (batch_size, max_hidden_rows) long, 每个样本的收集位置
-            hidden_positions = torch.zeros(batch_size, max_hidden_rows, dtype=torch.long)
+            hidden_positions = torch.zeros(
+                batch_size, max_hidden_rows, dtype=torch.long
+            )
             # hidden_position_mask: (batch_size, max_hidden_rows) bool, 标记有效位置
-            hidden_position_mask = torch.zeros(batch_size, max_hidden_rows, dtype=torch.bool)
+            hidden_position_mask = torch.zeros(
+                batch_size, max_hidden_rows, dtype=torch.bool
+            )
             # owner_rank: (batch_size,) long
             # 用轮转方式分配，确保样本均匀分布到各 drafter worker
             owner_count = self._speco_get_owner_count()
@@ -748,6 +817,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         except Exception as e:
             logger.error(f"Error building SFT collect plan: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
@@ -789,13 +859,22 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             # [TRACE Step A] 检查 batch 级别的 loss_mask 是否正确
             try:
                 if loss_mask.ndim >= 2:
-                    per_sample_sums = [loss_mask[i].sum().item() for i in range(min(4, loss_mask.size(0)))]
-                    logger.debug(f"[TRACE] Step A: batch loss_mask shape={loss_mask.shape}, "
-                                   f"per_sample_sums={per_sample_sums}")
+                    per_sample_sums = [
+                        loss_mask[i].sum().item()
+                        for i in range(min(4, loss_mask.size(0)))
+                    ]
+                    logger.debug(
+                        f"[TRACE] Step A: batch loss_mask shape={loss_mask.shape}, "
+                        f"per_sample_sums={per_sample_sums}"
+                    )
                 else:
-                    logger.debug(f"[TRACE] Step A: batch loss_mask shape={loss_mask.shape}, sum={loss_mask.sum().item()}")
+                    logger.debug(
+                        f"[TRACE] Step A: batch loss_mask shape={loss_mask.shape}, sum={loss_mask.sum().item()}"
+                    )
             except Exception as e:
-                logger.debug(f"[TRACE] Step A: batch loss_mask shape={loss_mask.shape}, error={e}")
+                logger.debug(
+                    f"[TRACE] Step A: batch loss_mask shape={loss_mask.shape}, error={e}"
+                )
 
             batch_size = collect_plan["collect_mask"].size(0)
             collect_mask = collect_plan["collect_mask"]
@@ -807,9 +886,13 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             hidden_refs_len = len(hidden_refs) if hidden_refs else 0
             hidden_ref_meta_len = len(hidden_ref_meta) if hidden_ref_meta else 0
             collect_mask_sum = int(collect_mask.sum().item())
-            logger.debug(f"[VERIFY-A] hidden_refs_len={hidden_refs_len}, hidden_ref_meta_len={hidden_ref_meta_len}, batch_size={batch_size}, collect_mask_sum={collect_mask_sum}")
+            logger.debug(
+                f"[VERIFY-A] hidden_refs_len={hidden_refs_len}, hidden_ref_meta_len={hidden_ref_meta_len}, batch_size={batch_size}, collect_mask_sum={collect_mask_sum}"
+            )
             if hidden_refs_len > 0 and hidden_refs_len != collect_mask_sum:
-                logger.debug(f"[VERIFY-A] MISMATCH! hidden_refs_len ({hidden_refs_len}) != collect_mask_sum ({collect_mask_sum}), 索引可能不对齐")
+                logger.debug(
+                    f"[VERIFY-A] MISMATCH! hidden_refs_len ({hidden_refs_len}) != collect_mask_sum ({collect_mask_sum}), 索引可能不对齐"
+                )
 
             # 构建 bucket（按 owner_count 分发到多卡）
             owner_count = int(collect_plan.get("owner_count", 1))
@@ -833,8 +916,10 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                     ref = hidden_refs[i] if i < len(hidden_refs) else None
                     ref_meta_map[int(meta_bidx)] = (ref, meta)
                 if self.global_steps <= 3:
-                    logger.debug(f"[REF-MAP] 构建 ref_meta_map: {len(ref_meta_map)} 个映射, "
-                                   f"keys={sorted(ref_meta_map.keys())[:16]}...")
+                    logger.debug(
+                        f"[REF-MAP] 构建 ref_meta_map: {len(ref_meta_map)} 个映射, "
+                        f"keys={sorted(ref_meta_map.keys())[:16]}..."
+                    )
 
             # [DEBUG] 收集有效索引映射
             valid_indices = []
@@ -847,7 +932,9 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 n_valid = int(valid_positions.sum().item())
                 if n_valid <= 0:
                     # [DEBUG] VERIFY-B: 样本被收集但无有效 token
-                    logger.debug(f"[VERIFY-B] batch_idx={batch_idx}: collect_mask=True but n_valid=0, hidden_position_mask sum={int(valid_positions.sum().item())}")
+                    logger.debug(
+                        f"[VERIFY-B] batch_idx={batch_idx}: collect_mask=True but n_valid=0, hidden_position_mask sum={int(valid_positions.sum().item())}"
+                    )
                     continue
 
                 # 记录有效索引
@@ -862,8 +949,10 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                     hidden_ref = self._speco_get_sequence_item(hidden_refs, batch_idx)
                     ref_meta = self._speco_get_sequence_item(hidden_ref_meta, batch_idx)
                     if self.global_steps <= 3:
-                        logger.debug(f"[REF-MAP-FALLBACK] batch_idx={batch_idx}: ref_meta_map miss, fallback to list index. "
-                                       f"hidden_ref={'OK' if hidden_ref else 'None'}, ref_meta={'OK' if ref_meta else 'None'}")
+                        logger.debug(
+                            f"[REF-MAP-FALLBACK] batch_idx={batch_idx}: ref_meta_map miss, fallback to list index. "
+                            f"hidden_ref={'OK' if hidden_ref else 'None'}, ref_meta={'OK' if ref_meta else 'None'}"
+                        )
 
                 # 获取 hidden states（通过 ray.get 解析 ObjectRef）
                 # ===== Bug #1 修复：按 ref_meta 正确切分 chunk =====
@@ -871,7 +960,9 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                     try:
                         hidden_tensor = ray.get(hidden_ref)
                     except Exception as e:
-                        logger.warning(f"[VERIFY-C] Failed to get hidden ref for sample {batch_idx}: {e}")
+                        logger.warning(
+                            f"[VERIFY-C] Failed to get hidden ref for sample {batch_idx}: {e}"
+                        )
                         continue
 
                     # oldlogprob_runtime 把同 owner 的多个样本 cat 成一个大 chunk，
@@ -886,7 +977,10 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         continue
                     chunk_start = int(ref_meta.get("chunk_start", 0) or 0)
                     chunk_length = int(ref_meta.get("chunk_length", 0) or 0)
-                    if chunk_length <= 0 or chunk_start + chunk_length > hidden_tensor.size(0):
+                    if (
+                        chunk_length <= 0
+                        or chunk_start + chunk_length > hidden_tensor.size(0)
+                    ):
                         # chunk_length 无效或切分越界，硬兜底：跳过
                         logger.warning(
                             f"[VERIFY-REF] batch_idx={batch_idx}: chunk 切分参数无效 "
@@ -894,7 +988,9 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                             f"tensor_rows={hidden_tensor.size(0)}，跳过样本"
                         )
                         continue
-                    hidden_tensor = hidden_tensor[chunk_start : chunk_start + chunk_length]
+                    hidden_tensor = hidden_tensor[
+                        chunk_start : chunk_start + chunk_length
+                    ]
                     # chunk_row_indices: SP 稀疏情况下的行重排列
                     row_idx_payload = ref_meta.get("chunk_row_indices")
                     if row_idx_payload is not None:
@@ -903,25 +999,40 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                                 [int(x) for x in row_idx_payload], dtype=torch.long
                             )
                         elif torch.is_tensor(row_idx_payload):
-                            row_idx_tensor = row_idx_payload.detach().cpu().long().reshape(-1)
+                            row_idx_tensor = (
+                                row_idx_payload.detach().cpu().long().reshape(-1)
+                            )
                         else:
                             row_idx_tensor = None
-                        if row_idx_tensor is not None and row_idx_tensor.numel() == hidden_tensor.size(0):
+                        if (
+                            row_idx_tensor is not None
+                            and row_idx_tensor.numel() == hidden_tensor.size(0)
+                        ):
                             hidden_tensor = hidden_tensor[row_idx_tensor]
                 elif hidden_states is not None:
                     # fallback 路径：hidden_states 也是压缩后的 tensor，
                     # 直接取前 n_valid 行，不用 positions 索引
-                    raw_h = hidden_states[batch_idx] if batch_idx < len(hidden_states) else None
+                    raw_h = (
+                        hidden_states[batch_idx]
+                        if batch_idx < len(hidden_states)
+                        else None
+                    )
                     if raw_h is None:
-                        logger.warning(f"[VERIFY-C] batch_idx={batch_idx}: raw hidden_states is None")
+                        logger.warning(
+                            f"[VERIFY-C] batch_idx={batch_idx}: raw hidden_states is None"
+                        )
                         continue
                     hidden_tensor = raw_h[:n_valid]
                 else:
-                    logger.warning(f"[VERIFY-C] batch_idx={batch_idx}: both hidden_ref and hidden_states are None")
+                    logger.warning(
+                        f"[VERIFY-C] batch_idx={batch_idx}: both hidden_ref and hidden_states are None"
+                    )
                     continue
 
                 if hidden_tensor is None:
-                    logger.warning(f"[VERIFY-C] batch_idx={batch_idx}: hidden_tensor is None after retrieval")
+                    logger.warning(
+                        f"[VERIFY-C] batch_idx={batch_idx}: hidden_tensor is None after retrieval"
+                    )
                     continue
 
                 # 切完 chunk 后 hidden_tensor 已正确指向本样本行段。
@@ -951,14 +1062,24 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         )
                         # 打印 hidden 的前 3 行前 10 维
                         first_rows = ht[:3, :10].cpu().tolist()
-                        logger.warning(f"[DIAG-HIDDEN] batch={batch_idx} first_3_rows_first_10={first_rows}")
+                        logger.warning(
+                            f"[DIAG-HIDDEN] batch={batch_idx} first_3_rows_first_10={first_rows}"
+                        )
 
                 # ===== SANITY CHECK: 验证 Bug #1 修复生效 =====
                 # 每步只对前 3 个样本打，避免日志刷屏
                 if batch_idx < 3 and hidden_ref is not None and ref_meta is not None:
                     positions_sanity = hidden_positions[batch_idx][:n_valid]
-                    first_seq_pos = int(positions_sanity[0].item()) if len(positions_sanity) > 0 else -1
-                    last_seq_pos = int(positions_sanity[-1].item()) if len(positions_sanity) > 0 else -1
+                    first_seq_pos = (
+                        int(positions_sanity[0].item())
+                        if len(positions_sanity) > 0
+                        else -1
+                    )
+                    last_seq_pos = (
+                        int(positions_sanity[-1].item())
+                        if len(positions_sanity) > 0
+                        else -1
+                    )
                     chunk_start_val = int(ref_meta.get("chunk_start", 0) or 0)
                     chunk_length_val = int(ref_meta.get("chunk_length", 0) or 0)
 
@@ -983,13 +1104,19 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 # ====================================================
 
                 # 获取该样本的 token 范围
-                is_nested = input_ids.is_nested if hasattr(input_ids, 'is_nested') else False
+                is_nested = (
+                    input_ids.is_nested if hasattr(input_ids, "is_nested") else False
+                )
                 if is_nested:
                     offsets = input_ids.offsets()
                     start = int(offsets[batch_idx])
                     end = int(offsets[batch_idx + 1])
                     # NestedTensor 不能直接切片，使用 .values() 获取扁平存储
-                    input_ids_flat = input_ids.values() if hasattr(input_ids, 'values') else input_ids
+                    input_ids_flat = (
+                        input_ids.values()
+                        if hasattr(input_ids, "values")
+                        else input_ids
+                    )
                     sample_input_ids = input_ids_flat[start:end]
                 else:
                     sample_input_ids = input_ids[batch_idx]
@@ -1004,12 +1131,20 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
                 # 获取该样本的原始 loss_mask（与 input_ids 对齐，不再左移）
                 if is_nested:
-                    lm_offsets = loss_mask.offsets() if hasattr(loss_mask, 'offsets') else None
-                    loss_mask_flat = loss_mask.values() if hasattr(loss_mask, 'values') else loss_mask
+                    lm_offsets = (
+                        loss_mask.offsets() if hasattr(loss_mask, "offsets") else None
+                    )
+                    loss_mask_flat = (
+                        loss_mask.values()
+                        if hasattr(loss_mask, "values")
+                        else loss_mask
+                    )
                     if lm_offsets is not None:
                         lm_start = int(lm_offsets[batch_idx])
                         lm_end = int(lm_offsets[batch_idx + 1])
-                        sample_loss_mask = loss_mask_flat[lm_start:lm_end].detach().cpu()
+                        sample_loss_mask = (
+                            loss_mask_flat[lm_start:lm_end].detach().cpu()
+                        )
                     else:
                         sample_loss_mask = loss_mask_flat[start:end].detach().cpu()
                 else:
@@ -1018,29 +1153,47 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 # [TRACE Step B] 检查 sample_loss_mask 是否正确
                 if sample_loss_mask is not None:
                     try:
-                        logger.debug(f"[TRACE] Step B: batch_idx={batch_idx}, "
-                                       f"sample_loss_mask shape={sample_loss_mask.shape}, "
-                                       f"sum={sample_loss_mask.sum().item()}, "
-                                       f"first_40={sample_loss_mask[:40].tolist()}")
+                        logger.debug(
+                            f"[TRACE] Step B: batch_idx={batch_idx}, "
+                            f"sample_loss_mask shape={sample_loss_mask.shape}, "
+                            f"sum={sample_loss_mask.sum().item()}, "
+                            f"first_40={sample_loss_mask[:40].tolist()}"
+                        )
                     except Exception as e:
-                        logger.debug(f"[TRACE] Step B: batch_idx={batch_idx}, error={e}")
+                        logger.debug(
+                            f"[TRACE] Step B: batch_idx={batch_idx}, error={e}"
+                        )
 
                 # 构建样本（注意：collect_online_data 期望 2D tensor）
-                sample_input_ids_2d = sample_input_ids.unsqueeze(0).detach().cpu()  # (1, seq_len)
-                hidden_tensor_2d = hidden_tensor.unsqueeze(0).detach().cpu()  # (1, hidden_dim)
-                
+                sample_input_ids_2d = (
+                    sample_input_ids.unsqueeze(0).detach().cpu()
+                )  # (1, seq_len)
+                hidden_tensor_2d = (
+                    hidden_tensor.unsqueeze(0).detach().cpu()
+                )  # (1, hidden_dim)
+
                 # 在构建 sample dict 之前添加调试日志
-                logger.debug(f"[DEBUG] Before sample dict: hidden_tensor.shape={hidden_tensor.shape}, positions.shape={positions.shape}")
+                logger.debug(
+                    f"[DEBUG] Before sample dict: hidden_tensor.shape={hidden_tensor.shape}, positions.shape={positions.shape}"
+                )
 
                 sample = {
                     "input_ids": sample_input_ids_2d,
                     "hidden_positions": positions.detach().cpu().unsqueeze(0),  # 2D
                     "hidden_states": hidden_tensor_2d,
-                    "hidden_position_start": int(positions[0].item()) if len(positions) > 0 else 0,
-                    "hidden_position_end": int(positions[-1].item()) + 1 if len(positions) > 0 else 0,
-                    "global_step": self.global_steps if hasattr(self, 'global_steps') else 0,
+                    "hidden_position_start": int(positions[0].item())
+                    if len(positions) > 0
+                    else 0,
+                    "hidden_position_end": int(positions[-1].item()) + 1
+                    if len(positions) > 0
+                    else 0,
+                    "global_step": self.global_steps
+                    if hasattr(self, "global_steps")
+                    else 0,
                     "replica_rank": int(owner_rank[batch_idx].item()),
-                    "loss_mask": sample_loss_mask.unsqueeze(0),  # (1, seq_len) 原始 loss_mask
+                    "loss_mask": sample_loss_mask.unsqueeze(
+                        0
+                    ),  # (1, seq_len) 原始 loss_mask
                     "hidden_states_layout": sft_hidden_layout,
                     "target_layer_ids": sft_target_layer_ids,
                 }
@@ -1048,26 +1201,38 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 # [TRACE Step C] 检查 sample dict 中的 loss_mask
                 try:
                     final_loss_mask = sample["loss_mask"]
-                    logger.debug(f"[TRACE] Step C: batch_idx={batch_idx}, "
-                                   f"final_loss_mask shape={final_loss_mask.shape}, "
-                                   f"sum={final_loss_mask.sum().item()}, "
-                                   f"first_40={final_loss_mask[0, :40].tolist()}")
+                    logger.debug(
+                        f"[TRACE] Step C: batch_idx={batch_idx}, "
+                        f"final_loss_mask shape={final_loss_mask.shape}, "
+                        f"sum={final_loss_mask.sum().item()}, "
+                        f"first_40={final_loss_mask[0, :40].tolist()}"
+                    )
                 except Exception as e:
                     logger.debug(f"[TRACE] Step C: batch_idx={batch_idx}, error={e}")
 
                 # 添加调试日志
-                logger.debug(f"[DEBUG] Sample dict created: hidden_states.shape={sample['hidden_states'].shape}, hidden_positions.shape={sample['hidden_positions'].shape}, loss_mask_sum={sample_loss_mask.sum().item()}")
+                logger.debug(
+                    f"[DEBUG] Sample dict created: hidden_states.shape={sample['hidden_states'].shape}, hidden_positions.shape={sample['hidden_positions'].shape}, loss_mask_sum={sample_loss_mask.sum().item()}"
+                )
 
                 if attention_mask is not None:
-                    if hasattr(attention_mask, 'offsets') and is_nested:
+                    if hasattr(attention_mask, "offsets") and is_nested:
                         am_offsets = attention_mask.offsets()
                         am_start = int(am_offsets[batch_idx])
                         am_end = int(am_offsets[batch_idx + 1])
                         # NestedTensor 不能直接切片
-                        attention_mask_flat = attention_mask.values() if hasattr(attention_mask, 'values') else attention_mask
-                        sample["attention_mask"] = attention_mask_flat[am_start:am_end].detach().cpu()
+                        attention_mask_flat = (
+                            attention_mask.values()
+                            if hasattr(attention_mask, "values")
+                            else attention_mask
+                        )
+                        sample["attention_mask"] = (
+                            attention_mask_flat[am_start:am_end].detach().cpu()
+                        )
                     else:
-                        sample["attention_mask"] = attention_mask[batch_idx].detach().cpu()
+                        sample["attention_mask"] = (
+                            attention_mask[batch_idx].detach().cpu()
+                        )
 
                 # 按 owner_rank 分发到对应 bucket（多卡支持）
                 owner = int(owner_rank[batch_idx].item())
@@ -1078,15 +1243,15 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             if collected_count > 0:
                 # 发送到 SpecoWorker
                 # buckets 已经是 list[list[dict]] 格式，与 PPO 模式一致
-                logger.warning(f"[_speco_collect_sft_features] Sending {len(buckets)} buckets with {collected_count} samples")
+                logger.warning(
+                    f"[_speco_collect_sft_features] Sending {len(buckets)} buckets with {collected_count} samples"
+                )
                 self.speco_collect_rollout_features(buckets)
 
                 # 更新统计
                 self._speco_last_sft_collected_samples = collected_count
                 total_elements = sum(
-                    s["hidden_states"].numel()
-                    for bucket in buckets
-                    for s in bucket
+                    s["hidden_states"].numel() for bucket in buckets for s in bucket
                 )
                 self._speco_last_sft_payload_mib = total_elements * 2 / (1024 * 1024)
 
@@ -1100,6 +1265,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         except Exception as e:
             logger.error(f"Error collecting SFT features: {e}")
             import traceback
+
             traceback.print_exc()
             return 0
 
@@ -1128,7 +1294,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         from verl.workers.utils.losses import sft_loss
 
         from verl_speco.workers.speco_training_worker import SpecoTrainingWorker
-        
+
         logger.info("[_build_engine] Using SpecoTrainingWorker with oldlogprob patch")
 
         self.loss_fn = partial(sft_loss, config=None)
@@ -1144,10 +1310,15 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
         wg_kwargs = {}
         if self.start_profile_step != -1:
-            wg_kwargs["profile_steps"] = list(range(self.start_profile_step, self.end_profile_step + 1))
+            wg_kwargs["profile_steps"] = list(
+                range(self.start_profile_step, self.end_profile_step + 1)
+            )
             if OmegaConf.select(self.config.profiler, "tool") == "nsys":
                 wg_kwargs["worker_nsight_options"] = OmegaConf.to_container(
-                    OmegaConf.select(self.config.global_profiler.global_tool_config.nsys, "worker_nsight_options")
+                    OmegaConf.select(
+                        self.config.global_profiler.global_tool_config.nsys,
+                        "worker_nsight_options",
+                    )
                 )
 
         n_gpus_per_node = self.config.trainer.n_gpus_per_node
@@ -1160,7 +1331,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         )
         # 保存供 Drafter WorkerGroup 共享使用（与 PPO 的 get_resource_pool 行为一致）
         self._speco_actor_resource_pool = self.resource_pool
-        
+
         # Use SpecoTrainingWorker instead of TrainingWorker
         # This ensures oldlogprob patch is installed in each worker process
         ray_cls_with_init = RayClassWithInitArgs(
@@ -1174,7 +1345,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         )
         self.training_client.set_loss_fn(loss_fn=self.loss_fn)
         self.training_client.reset()
-        
+
         logger.info("[_build_engine] SpecoTrainingWorker engine built successfully")
 
     def fit(self):
@@ -1184,7 +1355,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         1. Forward hook 抓取 hidden states
         2. 按间隔触发 drafter 训练
         3. 训练结束保存 drafter checkpoint
-        
+
         注意：oldlogprob patch 已在 SpecoTrainingWorker.__init__ 中安装（worker 进程内），
         无需在 driver 进程中再次调用 install_oldlogprob_hidden_runtime_patch()。
         """
@@ -1195,18 +1366,20 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
         if self._is_drafter_training_enabled():
             logger.info("Drafter training enabled, initializing worker group...")
-            
+
             # 0. 初始化 SpecoWorker group（如果尚未初始化）
             if self.drafter_wg is None:
                 self._speco_init_worker_group()
-            
+
             # 1. 激活 drafter 训练模型
             self.speco_activate_drafter_training_model()
-            
+
             # 2. oldlogprob patch 已在 SpecoTrainingWorker.__init__ 中安装
             #    这里不再需要在 driver 中调用
-            logger.info("Oldlogprob patch installed in worker processes via SpecoTrainingWorker")
-            
+            logger.info(
+                "Oldlogprob patch installed in worker processes via SpecoTrainingWorker"
+            )
+
             # 3. 执行带 SPECO hooks 的训练
             self._speco_fit_with_hooks()
         else:
@@ -1219,7 +1392,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             self._speco_save_final_checkpoint()
 
         logger.info("SpecoRaySFTRayTrainer.fit() completed")
-    
+
     def _speco_fit_with_hooks(self):
         """带 SPECO hooks 的训练循环。
 
@@ -1233,7 +1406,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         from tensordict.tensorclass import NonTensorData
         from tqdm import tqdm
         from verl.utils.tracking import Tracking
-        
+
         tracking = Tracking(
             project_name=self.config.trainer.project_name,
             experiment_name=self.config.trainer.experiment_name,
@@ -1276,51 +1449,63 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         total_tokens = 0
         total_collected = 0
         total_drafter_train_steps = 0
-        
+
         for epoch in range(start_epoch, self.config.trainer.total_epochs):
             self.train_sampler.set_epoch(epoch=epoch)
 
             for step_in_epoch, data in enumerate(
                 tqdm(
                     self.train_dataloader,
-                    initial=global_step % self.steps_per_epoch if epoch == start_epoch else 0,
+                    initial=global_step % self.steps_per_epoch
+                    if epoch == start_epoch
+                    else 0,
                     total=self.steps_per_epoch,
                     desc=f"Epoch {epoch + 1}/{self.config.trainer.total_epochs}",
                 )
             ):
                 global_step += 1
-                
+
                 # === 同步 global_steps 到实例属性（关键！供其他方法引用）===
                 self.global_steps = global_step
-                
+
                 # 设置全局 step 到 SpecoWorker
                 try:
                     self.speco_set_global_step(global_step)
                 except Exception:
                     pass
-                
+
                 # 构建 tensordict
                 data = tu.get_tensordict(tensor_dict=data, non_tensor_dict=meta_info)
                 batch_seqlens = self._get_batch_seqlens(data=data).tolist()
                 batch_seqlens_ntd = NonTensorData(batch_seqlens)
 
-                tu.assign_non_tensor(data, update_lr_scheduler=True, global_token_num=batch_seqlens_ntd)
+                tu.assign_non_tensor(
+                    data, update_lr_scheduler=True, global_token_num=batch_seqlens_ntd
+                )
 
                 # === SPECO: 构建 collect plan ===
                 collect_plan = self._speco_build_sft_collect_plan(data)
 
                 # 调试日志
                 if global_step <= 3 or collect_plan is not None:
-                    logger.debug(f"[DIAG] Step {global_step}: collect_plan={'None' if collect_plan is None else 'valid'}")
+                    logger.debug(
+                        f"[DIAG] Step {global_step}: collect_plan={'None' if collect_plan is None else 'valid'}"
+                    )
                     if collect_plan is not None:
-                        logger.debug(f"[DIAG] Step {global_step}: collect_mask sum={collect_plan['collect_mask'].sum().item()}/{collect_plan['collect_mask'].size(0)}")
+                        logger.debug(
+                            f"[DIAG] Step {global_step}: collect_mask sum={collect_plan['collect_mask'].sum().item()}/{collect_plan['collect_mask'].size(0)}"
+                        )
 
                 # === SPECO: 设置 collect plan 到 batch（用于 forward hook）===
                 if collect_plan is not None:
                     # 直接设置 tensor key 到 batch（与 PPO 版本一致）
                     data[OLD_LOGPROB_COLLECT_MASK_KEY] = collect_plan["collect_mask"]
-                    data[OLD_LOGPROB_HIDDEN_POSITIONS_KEY] = collect_plan["hidden_positions"]
-                    data[OLD_LOGPROB_HIDDEN_POSITION_MASK_KEY] = collect_plan["hidden_position_mask"]
+                    data[OLD_LOGPROB_HIDDEN_POSITIONS_KEY] = collect_plan[
+                        "hidden_positions"
+                    ]
+                    data[OLD_LOGPROB_HIDDEN_POSITION_MASK_KEY] = collect_plan[
+                        "hidden_position_mask"
+                    ]
                     data[OLD_LOGPROB_OWNER_RANK_KEY] = collect_plan["owner_rank"]
                     # Track original batch indices so the worker can restore
                     # sample order after dynamic micro-batching reorders them.
@@ -1330,15 +1515,25 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                             _input_ids.size(0), dtype=torch.long
                         )
                     # 配置 ObjectRef 传递和 capture impl
-                    tu.assign_non_tensor_data(data, OLD_LOGPROB_HIDDEN_CAPTURE_IMPL_KEY, "forward_hook")
-                    tu.assign_non_tensor_data(data, OLD_LOGPROB_HIDDEN_OBJECT_REF_KEY, True)
+                    tu.assign_non_tensor_data(
+                        data, OLD_LOGPROB_HIDDEN_CAPTURE_IMPL_KEY, "forward_hook"
+                    )
+                    tu.assign_non_tensor_data(
+                        data, OLD_LOGPROB_HIDDEN_OBJECT_REF_KEY, True
+                    )
                     # 设置 hidden layout 和 aux layer ids（根据算法动态选择）
                     hidden_layout = self._speco_oldlogprob_hidden_layout()
                     aux_layer_ids = self._speco_oldlogprob_aux_layer_ids()
-                    tu.assign_non_tensor_data(data, OLD_LOGPROB_HIDDEN_LAYOUT_KEY, hidden_layout)
-                    tu.assign_non_tensor_data(data, OLD_LOGPROB_AUX_LAYER_IDS_KEY, aux_layer_ids)
+                    tu.assign_non_tensor_data(
+                        data, OLD_LOGPROB_HIDDEN_LAYOUT_KEY, hidden_layout
+                    )
+                    tu.assign_non_tensor_data(
+                        data, OLD_LOGPROB_AUX_LAYER_IDS_KEY, aux_layer_ids
+                    )
                     if global_step <= 3:
-                        logger.debug(f"[DIAG] Step {global_step}: aux_layer_ids={aux_layer_ids}, layout={hidden_layout}")
+                        logger.debug(
+                            f"[DIAG] Step {global_step}: aux_layer_ids={aux_layer_ids}, layout={hidden_layout}"
+                        )
                 else:
                     # 清空所有 key
                     if OLD_LOGPROB_COLLECT_MASK_KEY in data.keys():
@@ -1353,10 +1548,17 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                     except ImportError:
                         calculate_workload = None
                         get_seqlen_balanced_partitions = None
-                    if calculate_workload is not None and get_seqlen_balanced_partitions is not None:
-                        global_seqlen_lst = torch.Tensor([item.size()[0] for item in data["input_ids"]])
+                    if (
+                        calculate_workload is not None
+                        and get_seqlen_balanced_partitions is not None
+                    ):
+                        global_seqlen_lst = torch.Tensor(
+                            [item.size()[0] for item in data["input_ids"]]
+                        )
                         global_seqlen_lst = calculate_workload(global_seqlen_lst)
-                        dp_size = max(self.training_client._query_dispatch_info("train")) + 1
+                        dp_size = (
+                            max(self.training_client._query_dispatch_info("train")) + 1
+                        )
                         global_partition_lst = get_seqlen_balanced_partitions(
                             global_seqlen_lst, k_partitions=dp_size, equal_size=True
                         )
@@ -1365,12 +1567,19 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         ordered_partition = partition[::2] + partition[1::2][::-1]
                         global_partition_lst[idx] = ordered_partition
 
-                    global_idx = torch.tensor([j for partition in global_partition_lst for j in partition])
+                    global_idx = torch.tensor(
+                        [j for partition in global_partition_lst for j in partition]
+                    )
                     data = tu.index_select_tensor_dict(data, global_idx)
                     # Reorder collect_plan tensors to match the reordered data
                     # so token/hidden-position/owner mapping stays consistent.
                     if collect_plan is not None:
-                        for _cp_key in ("collect_mask", "hidden_positions", "hidden_position_mask", "owner_rank"):
+                        for _cp_key in (
+                            "collect_mask",
+                            "hidden_positions",
+                            "hidden_position_mask",
+                            "owner_rank",
+                        ):
                             _cp_val = collect_plan.get(_cp_key)
                             if torch.is_tensor(_cp_val):
                                 collect_plan[_cp_key] = _cp_val[global_idx]
@@ -1384,19 +1593,28 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         data_keys = list(data.keys())
                         has_collect = OLD_LOGPROB_COLLECT_MASK_KEY in data_keys
                         has_positions = OLD_LOGPROB_HIDDEN_POSITIONS_KEY in data_keys
-                        logger.debug(f"[DIAG] Step {global_step}: Before train_batch - has_collect_mask={has_collect}, has_positions={has_positions}, keys_count={len(data_keys)}")
+                        logger.debug(
+                            f"[DIAG] Step {global_step}: Before train_batch - has_collect_mask={has_collect}, has_positions={has_positions}, keys_count={len(data_keys)}"
+                        )
                     except Exception as e:
-                        logger.debug(f"[DIAG] Step {global_step}: Before train_batch - error checking keys: {e}")
+                        logger.debug(
+                            f"[DIAG] Step {global_step}: Before train_batch - error checking keys: {e}"
+                        )
 
                 # === SPECO: 判断是否需要 drafter 训练 + 【关键】在 train_batch 之前同步 lm_head ===
                 # 时序：先同步 lm_head_V_a → train_batch forward 收集 hidden_V_a → drafter train 用 lm_head_V_a × hidden_V_a ✅
                 # 之前是 after-sync: hidden_V_a × lm_head_V_b ← 错了！
-                should_train_drafter = self._speco_should_train_drafter_this_step(global_step)
+                should_train_drafter = self._speco_should_train_drafter_this_step(
+                    global_step
+                )
                 if should_train_drafter:
                     import time as _time
+
                     _sync_start = _time.perf_counter()
                     _synced = False
-                    logger.warning(f"[LM-HEAD-SYNC] Step {global_step}: SYNC BEFORE train_batch (correct timing)")
+                    logger.warning(
+                        f"[LM-HEAD-SYNC] Step {global_step}: SYNC BEFORE train_batch (correct timing)"
+                    )
 
                     try:
                         # 1. 获取 row_indices (drafter vocab subset)
@@ -1412,47 +1630,74 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                             else:
                                 row_infos = []
                             non_null_infos = [
-                                info for info in row_infos
-                                if isinstance(info, dict) and info.get("row_indices") is not None
+                                info
+                                for info in row_infos
+                                if isinstance(info, dict)
+                                and info.get("row_indices") is not None
                             ]
                             if non_null_infos:
                                 first_info = non_null_infos[0]
                                 row_indices = first_info.get("row_indices")
-                                if hasattr(row_indices, 'detach'):
-                                    row_indices = row_indices.detach().cpu().long().reshape(-1)
+                                if hasattr(row_indices, "detach"):
+                                    row_indices = (
+                                        row_indices.detach().cpu().long().reshape(-1)
+                                    )
                                 elif isinstance(row_indices, (list, tuple)):
                                     import torch as _t
-                                    row_indices = _t.tensor([int(i) for i in row_indices], dtype=_t.long)
+
+                                    row_indices = _t.tensor(
+                                        [int(i) for i in row_indices], dtype=_t.long
+                                    )
                         except Exception as e_ri:
-                            logger.warning(f"[LM-HEAD-SYNC] Failed to get row_indices: {e_ri}")
+                            logger.warning(
+                                f"[LM-HEAD-SYNC] Failed to get row_indices: {e_ri}"
+                            )
 
                         # 2. 从 SFT worker 导出当前 lm_head 权重
                         try:
-                            _lm_head_export_ref = self.training_client.export_lm_head_weight_for_drafter(row_indices)
+                            _lm_head_export_ref = (
+                                self.training_client.export_lm_head_weight_for_drafter(
+                                    row_indices
+                                )
+                            )
                             payloads = self._ray_get_if_needed(_lm_head_export_ref)
                             if isinstance(payloads, list):
-                                payload = next((p for p in payloads if p is not None), None)
+                                payload = next(
+                                    (p for p in payloads if p is not None), None
+                                )
                             else:
                                 payload = payloads
 
                             if payload is not None:
-                                w = payload.get('weight')
-                                logger.warning(f"[LM-HEAD-SYNC] Exported lm_head: shape={tuple(w.shape) if hasattr(w, 'shape') else 'unknown'}")
+                                w = payload.get("weight")
+                                logger.warning(
+                                    f"[LM-HEAD-SYNC] Exported lm_head: shape={tuple(w.shape) if hasattr(w, 'shape') else 'unknown'}"
+                                )
                                 _sync_result = self._ray_get_if_needed(
-                                    self.speco_sync_target_lm_head_weight(payload, global_step=global_step)
+                                    self.speco_sync_target_lm_head_weight(
+                                        payload, global_step=global_step
+                                    )
                                 )
                                 _synced = True
-                                logger.warning(f"[LM-HEAD-SYNC] Sync OK: {_sync_result}")
+                                logger.warning(
+                                    f"[LM-HEAD-SYNC] Sync OK: {_sync_result}"
+                                )
                             else:
-                                logger.warning("[LM-HEAD-SYNC] Export returned None (OK on non-rank-0)")
+                                logger.warning(
+                                    "[LM-HEAD-SYNC] Export returned None (OK on non-rank-0)"
+                                )
                         except Exception as e_export:
-                            logger.warning(f"[LM-HEAD-SYNC] Export/sync failed: {e_export}")
+                            logger.warning(
+                                f"[LM-HEAD-SYNC] Export/sync failed: {e_export}"
+                            )
 
                     except Exception as e_sync:
                         logger.warning(f"[LM-HEAD-SYNC] Sync block error: {e_sync}")
 
                     _sync_elapsed = _time.perf_counter() - _sync_start
-                    logger.warning(f"[LM-HEAD-SYNC] Step {global_step}: synced={_synced}, elapsed={_sync_elapsed:.3f}s")
+                    logger.warning(
+                        f"[LM-HEAD-SYNC] Step {global_step}: synced={_synced}, elapsed={_sync_elapsed:.3f}s"
+                    )
 
                 # === 执行训练 ===
                 output = self.training_client.train_batch(data)
@@ -1469,62 +1714,98 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 if collect_plan is not None:
                     # 诊断：检查 output 里是否有 hidden refs
                     if global_step <= 3:
-                        out_keys = list(output.keys()) if hasattr(output, 'keys') else 'no keys attr'
-                        has_hidden_refs = OLD_LOGPROB_HIDDEN_REFS_KEY in output.keys() if hasattr(output, 'keys') else False
-                        has_hidden_states = OLD_LOGPROB_HIDDEN_STATES_KEY in output.keys() if hasattr(output, 'keys') else False
-                        logger.debug(f"[DIAG] Step {global_step}: output has hidden_refs={has_hidden_refs}, has_hidden_states={has_hidden_states}, output keys={out_keys[:10]}")
-                    
-                    collected = self._speco_collect_sft_features(data, collect_plan, output)
+                        out_keys = (
+                            list(output.keys())
+                            if hasattr(output, "keys")
+                            else "no keys attr"
+                        )
+                        has_hidden_refs = (
+                            OLD_LOGPROB_HIDDEN_REFS_KEY in output.keys()
+                            if hasattr(output, "keys")
+                            else False
+                        )
+                        has_hidden_states = (
+                            OLD_LOGPROB_HIDDEN_STATES_KEY in output.keys()
+                            if hasattr(output, "keys")
+                            else False
+                        )
+                        logger.debug(
+                            f"[DIAG] Step {global_step}: output has hidden_refs={has_hidden_refs}, has_hidden_states={has_hidden_states}, output keys={out_keys[:10]}"
+                        )
+
+                    collected = self._speco_collect_sft_features(
+                        data, collect_plan, output
+                    )
                     total_collected += collected
                     if global_step <= 3 or collected > 0:
-                        logger.debug(f"[DIAG] Step {global_step}: collected {collected} samples")
+                        logger.debug(
+                            f"[DIAG] Step {global_step}: collected {collected} samples"
+                        )
                     # 调试日志
                     if global_step <= 3 or collected > 0:
-                        logger.info(f"Step {global_step}: collected {collected} samples")
-                
+                        logger.info(
+                            f"Step {global_step}: collected {collected} samples"
+                        )
+
                 # === SPECO: 按间隔触发 drafter 训练 ===
                 # lm_head 已在 train_batch 之前同步 ✅
                 if should_train_drafter:
-                    logger.warning(f"{'='*60}")
-                    logger.warning(f"[Drafter Training] Step {global_step}: STARTING (lm_head synced before train_batch)")
-                    logger.warning(f"{'='*60}")
+                    logger.warning(f"{'=' * 60}")
+                    logger.warning(
+                        f"[Drafter Training] Step {global_step}: STARTING (lm_head synced before train_batch)"
+                    )
+                    logger.warning(f"{'=' * 60}")
                     try:
                         import time
+
                         start_time = time.time()
                         train_result = self.speco_train_drafter()
                         elapsed = time.time() - start_time
                         total_drafter_train_steps += 1
-                        logger.warning(f"[Drafter Training] Step {global_step}: COMPLETED in {elapsed:.2f}s, Result: {train_result}")
+                        logger.warning(
+                            f"[Drafter Training] Step {global_step}: COMPLETED in {elapsed:.2f}s, Result: {train_result}"
+                        )
                     except Exception as e:
-                        logger.error(f"[Drafter Training] Step {global_step}: FAILED: {e}")
+                        logger.error(
+                            f"[Drafter Training] Step {global_step}: FAILED: {e}"
+                        )
                         import traceback
+
                         traceback.print_exc()
 
                 metrics = tu.get(output, "metrics")
                 if should_train_drafter:
-                    metrics["drafter/target_lm_head_synced"] = int(_synced if '_synced' in dir() else 0)
+                    metrics["drafter/target_lm_head_synced"] = int(
+                        _synced if "_synced" in dir() else 0
+                    )
                 metrics["train/loss"] = metrics.pop("loss")
                 metrics["train/grad_norm"] = metrics.pop("grad_norm")
                 metrics["train/lr"] = metrics.pop("lr")
                 metrics["train/mfu"] = metrics.pop("mfu")
-                metrics["train/global_tokens"] = torch.sum(torch.tensor(batch_seqlens, device=self.device_name)).item()
+                metrics["train/global_tokens"] = torch.sum(
+                    torch.tensor(batch_seqlens, device=self.device_name)
+                ).item()
                 total_tokens += metrics["train/global_tokens"]
                 metrics["train/total_tokens(B)"] = total_tokens / 1e9
-                
+
                 # 添加 SPECO 相关指标
                 metrics["speco/collected_samples"] = total_collected
                 metrics["speco/drafter_train_steps"] = total_drafter_train_steps
                 metrics["speco/drafter_should_train"] = int(should_train_drafter)
-                if hasattr(self, '_speco_last_sft_payload_mib'):
+                if hasattr(self, "_speco_last_sft_payload_mib"):
                     metrics["speco/payload_mib"] = self._speco_last_sft_payload_mib
-                
+
                 tracking.log(data=metrics, step=global_step)
 
                 # === 新增：显存清理（关键！）===
                 import gc
+
                 gc.collect()
                 device_module = get_torch_device()
-                if hasattr(device_module, "is_available") and device_module.is_available():
+                if (
+                    hasattr(device_module, "is_available")
+                    and device_module.is_available()
+                ):
                     device_module.empty_cache()
                 # ==================================
 
@@ -1532,16 +1813,24 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 is_valid_step = global_step % self.test_freq == 0
                 is_save_step = global_step % self.save_freq == 0
 
-                if is_last_step and self.val_dataloader is not None or (self.test_freq > 0 and is_valid_step):
+                if (
+                    is_last_step
+                    and self.val_dataloader is not None
+                    or (self.test_freq > 0 and is_valid_step)
+                ):
                     val_losses = []
                     for val_data in self.val_dataloader:
-                        val_data = tu.get_tensordict(tensor_dict=val_data, non_tensor_dict=meta_info)
+                        val_data = tu.get_tensordict(
+                            tensor_dict=val_data, non_tensor_dict=meta_info
+                        )
                         val_output = self.training_client.infer_batch(val_data)
                         val_output = val_output.get()
                         val_metrics = tu.get(val_output, "metrics")
                         val_losses.append(val_metrics["loss"])
 
-                    val_loss = torch.mean(torch.tensor(val_losses, device=self.device_name))
+                    val_loss = torch.mean(
+                        torch.tensor(val_losses, device=self.device_name)
+                    )
                     metric = {"val/loss": val_loss.detach().item()}
                     tracking.log(data=metric, step=global_step)
                     last_valid_metric = metric
@@ -1554,7 +1843,9 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
                 if is_last_step:
                     logger.info(f"Total collected samples: {total_collected}")
-                    logger.info(f"Total drafter train steps: {total_drafter_train_steps}")
+                    logger.info(
+                        f"Total drafter train steps: {total_drafter_train_steps}"
+                    )
                     print(f"Total time for train steps: {train_time:.2f}s")
                     print(f"Final validation metrics: {last_valid_metric}")
                     return
@@ -1567,6 +1858,8 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             return
 
         # 使用 self.global_steps（训练循环中已同步）；若训练循环提前 return 则用 resume_global_step 兜底
-        final_step = getattr(self, 'global_steps', None) or getattr(self, 'resume_global_step', 0)
+        final_step = getattr(self, "global_steps", None) or getattr(
+            self, "resume_global_step", 0
+        )
         self.speco_save_checkpoint(global_step=final_step, wait=True)
         logger.info(f"Drafter checkpoint saved to: {save_dir}")

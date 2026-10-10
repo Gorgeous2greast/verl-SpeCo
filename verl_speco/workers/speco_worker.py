@@ -1098,7 +1098,9 @@ class SpecoWorker(Worker):
     )
     def collect_rollout_features(self, samples: list[dict]):
         # [SFT-VERIFY] 验证数据收集
-        logger.warning(f"[SFT-VERIFY] Rank={self.rank}: received {len(samples)} samples, trainer_exists={self.trainer is not None}, in_drafter_train_group={self.in_drafter_train_group}")
+        logger.warning(
+            f"[SFT-VERIFY] Rank={self.rank}: received {len(samples)} samples, trainer_exists={self.trainer is not None}, in_drafter_train_group={self.in_drafter_train_group}"
+        )
         if not samples:
             return
         valid_count = 0
@@ -1123,7 +1125,9 @@ class SpecoWorker(Worker):
                 else:
                     # 没有 response token，使用空 response
                     batch["prompts"] = sample["input_ids"]
-                    batch["responses"] = torch.zeros(1, 0, dtype=sample["input_ids"].dtype)
+                    batch["responses"] = torch.zeros(
+                        1, 0, dtype=sample["input_ids"].dtype
+                    )
                 batch["loss_mask"] = sample["loss_mask"]
             # 只在值有效时才添加（SFT 模式下可能没有这些字段）
             if "prompts" in sample and sample["prompts"] is not None:

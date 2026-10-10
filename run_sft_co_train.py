@@ -100,6 +100,7 @@ def main(config):
 
     # ========== 关键：关闭 OmegaConf struct 模式 ==========
     from omegaconf import OmegaConf, open_dict
+
     OmegaConf.set_struct(config, False)
 
     # ========== 路径映射：speco_base.yaml 的 drafter 配置在 actor_rollout_ref.rollout.drafter，
@@ -133,12 +134,24 @@ def main(config):
     config.data.num_workers = config.data.get("num_workers", None) or 0
 
     # ========== 训练配置（CLI 优先，常量作为 fallback）==========
-    config.data.train_batch_size = config.data.get("train_batch_size", None) or TRAIN_BATCH_SIZE
-    config.data.micro_batch_size_per_gpu = config.data.get("micro_batch_size_per_gpu", None) or MICRO_BATCH_SIZE_PER_GPU
-    config.data.max_token_len_per_gpu = config.data.get("max_token_len_per_gpu", None) or MAX_TOKEN_LEN_PER_GPU
-    config.trainer.total_training_steps = config.trainer.get("total_training_steps", None) or TOTAL_TRAINING_STEPS
-    config.trainer.total_epochs = config.trainer.get("total_epochs", None) or TOTAL_EPOCHS
-    config.trainer.n_gpus_per_node = config.trainer.get("n_gpus_per_node", None) or N_GPUS_PER_NODE
+    config.data.train_batch_size = (
+        config.data.get("train_batch_size", None) or TRAIN_BATCH_SIZE
+    )
+    config.data.micro_batch_size_per_gpu = (
+        config.data.get("micro_batch_size_per_gpu", None) or MICRO_BATCH_SIZE_PER_GPU
+    )
+    config.data.max_token_len_per_gpu = (
+        config.data.get("max_token_len_per_gpu", None) or MAX_TOKEN_LEN_PER_GPU
+    )
+    config.trainer.total_training_steps = (
+        config.trainer.get("total_training_steps", None) or TOTAL_TRAINING_STEPS
+    )
+    config.trainer.total_epochs = (
+        config.trainer.get("total_epochs", None) or TOTAL_EPOCHS
+    )
+    config.trainer.n_gpus_per_node = (
+        config.trainer.get("n_gpus_per_node", None) or N_GPUS_PER_NODE
+    )
     config.trainer.nnodes = config.trainer.get("nnodes", None) or N_NODES
     config.trainer.balance_batch = False  # SFT co-train 不需要 batch balancing
     config.trainer.resume_mode = config.trainer.get("resume_mode", None) or "disable"
@@ -147,10 +160,18 @@ def main(config):
     config.trainer.save_freq = config.trainer.get("save_freq", None) or SAVE_FREQ
     config.trainer.test_freq = config.trainer.get("test_freq", None) or TEST_FREQ
     config.trainer.logger = config.trainer.get("logger", None) or ["console", "wandb"]
-    config.trainer.project_name = config.trainer.get("project_name", None) or "sft_cotrain_comparison"
-    config.trainer.experiment_name = config.trainer.get("experiment_name", None) or f"sft_{EXPERIMENT_TYPE}_{EXPERIMENT_TIMESTAMP}"
-    config.trainer.default_local_dir = config.trainer.get("default_local_dir", None) or f"checkpoints/sft_{EXPERIMENT_TYPE}_{EXPERIMENT_TIMESTAMP}"
-    
+    config.trainer.project_name = (
+        config.trainer.get("project_name", None) or "sft_cotrain_comparison"
+    )
+    config.trainer.experiment_name = (
+        config.trainer.get("experiment_name", None)
+        or f"sft_{EXPERIMENT_TYPE}_{EXPERIMENT_TIMESTAMP}"
+    )
+    config.trainer.default_local_dir = (
+        config.trainer.get("default_local_dir", None)
+        or f"checkpoints/sft_{EXPERIMENT_TYPE}_{EXPERIMENT_TIMESTAMP}"
+    )
+
     # ========== 数据格式配置 ==========
     config.model.use_remove_padding = True
     config.data.pad_mode = "no_padding"
@@ -163,69 +184,84 @@ def main(config):
 
     # ========== 实验类型 & 算法（CLI 优先，常量作为 fallback）==========
     experiment_type = config.get("experiment_type", EXPERIMENT_TYPE)
-    speculative_algorithm = str(config.rollout.drafter.get("speculative_algorithm", SPECULATIVE_ALGORITHM)).upper()
-    enable_co_train = (experiment_type == "cotrain")
-    
-    if not hasattr(config, 'speco'):
+    speculative_algorithm = str(
+        config.rollout.drafter.get("speculative_algorithm", SPECULATIVE_ALGORITHM)
+    ).upper()
+    enable_co_train = experiment_type == "cotrain"
+
+    if not hasattr(config, "speco"):
         from omegaconf import open_dict
+
         with open_dict(config):
             config.speco = OmegaConf.create({})
-    
+
     # 必须使用 open_dict 包裹，才能添加不存在的字段
     from omegaconf import open_dict
+
     with open_dict(config.speco):
         config.speco.mode = "sft"
-        config.speco.sft_specific = OmegaConf.create({
-            "enable_drafter_training": enable_co_train,
-            "drafter_train_interval": 5,
-            "max_samples_per_step": 200,
-            "hidden_layer_id": -1,
-            "publish_during_sft": False,
-            "checkpoint_save_dir": f"checkpoints/sft_{experiment_type}_{EXPERIMENT_TIMESTAMP}/drafter"
-        })
-    
+        config.speco.sft_specific = OmegaConf.create(
+            {
+                "enable_drafter_training": enable_co_train,
+                "drafter_train_interval": 5,
+                "max_samples_per_step": 200,
+                "hidden_layer_id": -1,
+                "publish_during_sft": False,
+                "checkpoint_save_dir": f"checkpoints/sft_{experiment_type}_{EXPERIMENT_TIMESTAMP}/drafter",
+            }
+        )
+
     print("=" * 60)
     print(f"SPECO SFT - Experiment: {experiment_type}")
     print(f"Co-train enabled: {enable_co_train}")
     print("=" * 60)
 
     # ========== rollout.drafter 配置 ==========
-    if not hasattr(config, 'rollout'):
+    if not hasattr(config, "rollout"):
         from omegaconf import open_dict
+
         with open_dict(config):
             config.rollout = OmegaConf.create({})
-    
+
     # 注入 rollout 基础配置
-    if not hasattr(config.rollout, 'tensor_model_parallel_size'):
+    if not hasattr(config.rollout, "tensor_model_parallel_size"):
         from omegaconf import open_dict
+
         with open_dict(config.rollout):
             config.rollout.tensor_model_parallel_size = 1
-    if not hasattr(config.rollout, 'data_parallel_size'):
+    if not hasattr(config.rollout, "data_parallel_size"):
         from omegaconf import open_dict
+
         with open_dict(config.rollout):
             config.rollout.data_parallel_size = 1
-    if not hasattr(config.rollout, 'pipeline_model_parallel_size'):
+    if not hasattr(config.rollout, "pipeline_model_parallel_size"):
         from omegaconf import open_dict
+
         with open_dict(config.rollout):
             config.rollout.pipeline_model_parallel_size = 1
 
     # 注入 drafter 基础配置
-    if not hasattr(config.rollout, 'drafter'):
+    if not hasattr(config.rollout, "drafter"):
         from omegaconf import open_dict
+
         with open_dict(config.rollout):
             config.rollout.drafter = OmegaConf.create({})
-    
+
     # 设置 drafter 基础配置（必须用 open_dict 包裹）
     from omegaconf import open_dict
+
     with open_dict(config.rollout.drafter):
         config.rollout.drafter.enable = enable_co_train
         config.rollout.drafter.enable_drafter_training = enable_co_train
         config.rollout.drafter.model_path = ""
         config.rollout.drafter.speculative_algorithm = speculative_algorithm
-        config.rollout.drafter.checkpoint_path = f"checkpoints/sft_{experiment_type}_{EXPERIMENT_TIMESTAMP}/drafter"
-    
+        config.rollout.drafter.checkpoint_path = (
+            f"checkpoints/sft_{experiment_type}_{EXPERIMENT_TIMESTAMP}/drafter"
+        )
+
     # ========== drafter training 配置（实验级覆盖，其余走 speco_base.yaml + speco_sft_trainer.yaml 默认值）==========
     from omegaconf import open_dict
+
     with open_dict(config.rollout.drafter.training):
         config.rollout.drafter.training.enable = enable_co_train
         config.rollout.drafter.training.enable_drafter_training = enable_co_train
@@ -234,18 +270,24 @@ def main(config):
 
         # DSpark 专用参数（仅 DSPARK 算法时覆盖，其余走 speco_base.yaml 默认值）
         if speculative_algorithm == "DSPARK":
-            config.rollout.drafter.training.dspark_l1_loss_alpha = 0.9  # >0 → layout=dflash_aux_plus_last
+            config.rollout.drafter.training.dspark_l1_loss_alpha = (
+                0.9  # >0 → layout=dflash_aux_plus_last
+            )
             config.rollout.drafter.training.dspark_num_target_layers = 5  # context 层数
-            config.rollout.drafter.training.dspark_target_layer_ids = None  # 让框架自动推导
+            config.rollout.drafter.training.dspark_target_layer_ids = (
+                None  # 让框架自动推导
+            )
 
         # FSDP config（SFT 单卡验证用）
-        config.rollout.drafter.training.fsdp_config = OmegaConf.create({
-            "param_offload": True,
-            "optimizer_offload": True,
-            "use_orig_params": True,
-            "forward_prefetch": False,
-            "wrap_policy": OmegaConf.create({"min_num_params": 0}),
-        })
+        config.rollout.drafter.training.fsdp_config = OmegaConf.create(
+            {
+                "param_offload": True,
+                "optimizer_offload": True,
+                "use_orig_params": True,
+                "forward_prefetch": False,
+                "wrap_policy": OmegaConf.create({"min_num_params": 0}),
+            }
+        )
 
         # 训练 batch 参数
         config.rollout.drafter.training.training_batch_size = 8
@@ -259,13 +301,14 @@ def main(config):
         # 其他必要配置
         config.rollout.drafter.training.is_offload_param = True
         config.rollout.drafter.training.is_offload_optimizer = True
-    
+
     # ========== sft_drafter 配置（SpecoWorker 需要）==========
-    if not hasattr(config, 'sft_drafter'):
+    if not hasattr(config, "sft_drafter"):
         from omegaconf import open_dict
+
         with open_dict(config):
             config.sft_drafter = OmegaConf.create({})
-    
+
     with open_dict(config.sft_drafter):
         config.sft_drafter.enable_training = enable_co_train
         config.sft_drafter.train_interval = 5
@@ -294,7 +337,9 @@ def main(config):
     print(f"Loading tokenizer from {model_path}...")
     tokenizer = hf_tokenizer(model_path, trust_remote_code=trust_remote_code)
     print(f"Loading processor from {model_path}...")
-    processor = hf_processor(model_path, trust_remote_code=trust_remote_code, use_fast=True)
+    processor = hf_processor(
+        model_path, trust_remote_code=trust_remote_code, use_fast=True
+    )
 
     print(f"Loading training data from {config.data.train_files}...")
     train_dataset = create_sft_dataset(
@@ -307,16 +352,17 @@ def main(config):
     print(f"Train dataset size: {len(train_dataset)}")
 
     speco_worker_cls = None
-    if hasattr(config, 'speco') and hasattr(config.speco, 'sft_specific'):
+    if hasattr(config, "speco") and hasattr(config.speco, "sft_specific"):
         sft_specific = config.speco.sft_specific
-        if getattr(sft_specific, 'enable_drafter_training', False):
+        if getattr(sft_specific, "enable_drafter_training", False):
             try:
                 from verl_speco.workers import SpecoWorker
+
                 speco_worker_cls = ray.remote(SpecoWorker)
                 logger.info("SpecoWorker created")
             except ImportError as e:
                 logger.warning(f"SpecoWorker import failed: {e}")
-            
+
             print("\nCreating SpecoRaySFTRayTrainer...")
     trainer = SpecoRaySFTRayTrainer(
         config=config,
@@ -324,14 +370,14 @@ def main(config):
     )
 
     print("\nVerifying methods:")
-    methods = ['fit', '_speco_fit_with_hooks', '_speco_build_sft_collect_plan']
+    methods = ["fit", "_speco_fit_with_hooks", "_speco_build_sft_collect_plan"]
     for m in methods:
         print(f"  - {m}: {'✅' if hasattr(trainer, m) else '❌'}")
 
     print("\n" + "=" * 60)
     print("Starting SFT co-train...")
     print("=" * 60)
-    
+
     try:
         trainer.fit()
         print("\n" + "=" * 60)
@@ -340,8 +386,10 @@ def main(config):
     except Exception as e:
         print(f"\n❌ Training failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
