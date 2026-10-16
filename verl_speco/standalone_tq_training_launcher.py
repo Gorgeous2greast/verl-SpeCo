@@ -72,6 +72,12 @@ _PRODUCER_HIDDEN_DTYPE_KEY = "speco.standalone_tq_producer.hidden_dtype"
 _DSPARK_L1_LOSS_ALPHA_KEY = (
     "actor_rollout_ref.rollout.drafter.training.dspark_l1_loss_alpha"
 )
+_DSPARK_CONFIDENCE_LOSS_ALPHA_KEY = (
+    "actor_rollout_ref.rollout.drafter.training.dspark_confidence_loss_alpha"
+)
+_DSPARK_CE_TARGET_SOURCE_KEY = (
+    "actor_rollout_ref.rollout.drafter.training.ce_target_source"
+)
 _ALGORITHM_TARGET_LAYER_IDS_KEYS = {
     "EAGLE3": "actor_rollout_ref.rollout.drafter.training.eagle3_target_layer_ids",
     "DFLASH": "actor_rollout_ref.rollout.drafter.training.dflash_target_layer_ids",
@@ -231,11 +237,15 @@ def _producer_config_keys() -> frozenset[str]:
     return frozenset(keys)
 
 
-def _find_override(overrides: Sequence[str], key: str) -> str | None:
+def _find_override(
+    overrides: Sequence[str], key: str, *, normalize_key: bool = False
+) -> str | None:
     for item in reversed(overrides):
         parsed = _split_override(item)
-        if parsed is not None and parsed[0] == key:
-            return parsed[1]
+        if parsed is not None:
+            candidate = parsed[0].lstrip("+") if normalize_key else parsed[0]
+            if candidate == key:
+                return parsed[1]
     return None
 
 
@@ -893,6 +903,24 @@ def build_pipeline_commands(
         producer_tuning_overrides.append(item)
     producer_overrides = [
         f"{_ALGORITHM_KEY}={config.algorithm}",
+        "actor_rollout_ref.rollout.drafter.training.dflash_block_size="
+        + (
+            _find_override(
+                training_args,
+                "actor_rollout_ref.rollout.drafter.training.dflash_block_size",
+                normalize_key=True,
+            )
+            or "16"
+        ),
+        "actor_rollout_ref.rollout.drafter.training.preserve_prompt_hidden_states="
+        + (
+            _find_override(
+                training_args,
+                "actor_rollout_ref.rollout.drafter.training.preserve_prompt_hidden_states",
+                normalize_key=True,
+            )
+            or "true"
+        ),
         *tq_overrides,
         *producer_tuning_overrides,
         f"speco.standalone_tq_producer.input_path={config.input_path}",
@@ -930,12 +958,37 @@ def build_pipeline_commands(
     hidden_dtype = _strip_quotes(
         _find_override(training_args, _PRODUCER_HIDDEN_DTYPE_KEY) or "bfloat16"
     )
-    dspark_l1_loss_alpha = float(
-        _strip_quotes(_find_override(training_args, _DSPARK_L1_LOSS_ALPHA_KEY) or "0.9")
+    # The Producer's collected layout and the Consumer's expected layout must
+    # agree, so resolve the loss settings that select it (dflash_aux vs
+    # dflash_aux_plus_last) once here and forward the same values to both.
+    dspark_l1_loss_alpha = _strip_quotes(
+        _find_override(training_args, _DSPARK_L1_LOSS_ALPHA_KEY, normalize_key=True)
+        or "0.9"
+    )
+    dspark_confidence_loss_alpha = _strip_quotes(
+        _find_override(
+            training_args, _DSPARK_CONFIDENCE_LOSS_ALPHA_KEY, normalize_key=True
+        )
+        or "0.0"
+    )
+    ce_target_source = _strip_quotes(
+        _find_override(training_args, _DSPARK_CE_TARGET_SOURCE_KEY, normalize_key=True)
+        or "labels"
+    )
+    producer_overrides.extend(
+        [
+            f"{_DSPARK_L1_LOSS_ALPHA_KEY}={dspark_l1_loss_alpha}",
+            f"{_DSPARK_CONFIDENCE_LOSS_ALPHA_KEY}={dspark_confidence_loss_alpha}",
+            f"{_DSPARK_CE_TARGET_SOURCE_KEY}={ce_target_source}",
+        ]
     )
     hidden_layout = resolve_drafter_hidden_states_layout(
         config.algorithm,
-        {"dspark_l1_loss_alpha": dspark_l1_loss_alpha},
+        {
+            "dspark_l1_loss_alpha": float(dspark_l1_loss_alpha),
+            "dspark_confidence_loss_alpha": float(dspark_confidence_loss_alpha),
+            "ce_target_source": ce_target_source,
+        },
     )
     consumer_internal.extend(
         [
