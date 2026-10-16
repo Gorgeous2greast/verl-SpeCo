@@ -362,7 +362,12 @@ class DSparkTrainingModel(DFlashTrainingModel):
         active_draft_log_probs: torch.Tensor | None = None,
         active_target_logits: torch.Tensor | None = None,
     ) -> tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
     ]:
         if active_hidden.numel() == 0:
             zero = active_weights.new_zeros(())
@@ -512,8 +517,6 @@ class DSparkTrainingModel(DFlashTrainingModel):
                     ).sum()
                 )
         return l1_sum, l1_den, conf_sum, conf_den, accept_sum, pred_sum
-
-
 
     def _should_debug_log(self) -> bool:
         if not self.debug_log:
