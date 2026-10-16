@@ -357,8 +357,13 @@ class DSparkTrainingModel(DFlashTrainingModel):
         active_target_hidden: torch.Tensor,
         active_weights: torch.Tensor,
         lm_head_weight: torch.Tensor,
+        use_fused: bool,
+        active_draft_logits: torch.Tensor | None = None,
         active_draft_log_probs: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        active_target_logits: torch.Tensor | None = None,
+    ) -> tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+    ]:
         if active_hidden.numel() == 0:
             zero = active_weights.new_zeros(())
             return zero, zero, zero, zero, zero, zero
@@ -397,7 +402,7 @@ class DSparkTrainingModel(DFlashTrainingModel):
             weights_chunk = active_weights[start:end].float()
 
             draft_logits: torch.Tensor | None = None
-            draft_probs: torch.Tensor | None
+            draft_probs: torch.Tensor | None = None
             target_probs: torch.Tensor | None = None
             if not use_fused and active_draft_log_probs is not None:
                 draft_probs = active_draft_log_probs[start:end].exp()
@@ -414,35 +419,6 @@ class DSparkTrainingModel(DFlashTrainingModel):
                 if markov_bias is not None:
                     draft_logits = draft_logits + markov_bias
                 draft_probs = torch.softmax(draft_logits.float(), dim=-1)
-            else:
-                draft_probs = active_draft_log_probs[start:end].exp()
-            target_logits = F.linear(target_hidden_chunk, lm_head_weight)
-            target_probs = torch.softmax(target_logits.float(), dim=-1)
-            l1_dist = (draft_probs - target_probs).abs().sum(dim=-1)
-            l1_sum = l1_sum + (l1_dist * weights_chunk).sum()
-        return l1_sum, l1_den
-
-    def _compute_fused_l1_loss_for_active(
-        self,
-        *,
-        active_hidden: torch.Tensor,
-        active_prev_tokens: torch.Tensor,
-        active_target_hidden: torch.Tensor,
-        active_weights: torch.Tensor,
-        lm_head_weight: torch.Tensor,
-        active_draft_logits: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        if active_hidden.numel() == 0:
-            zero = active_weights.new_zeros((), dtype=torch.float32)
-            return zero, zero
-        active_count = int(active_hidden.size(0))
-        if active_draft_logits is not None:
-            expected_shape = (active_count, int(lm_head_weight.size(0)))
-            if tuple(active_draft_logits.shape) != expected_shape:
-                raise ValueError(
-                    "DSpark precomputed draft logits must have shape "
-                    f"{expected_shape}, got {tuple(active_draft_logits.shape)}"
-                )
 
             with torch.no_grad():
                 target_logits = (
@@ -461,8 +437,6 @@ class DSparkTrainingModel(DFlashTrainingModel):
                 if l1_enabled:
                     tv = fused_total_variation(draft_logits, target_logits)
                 else:
-                    # Confidence-only: the varying part is discarded, so skip
-                    # building an autograd graph for the fused TV.
                     with torch.no_grad():
                         tv = fused_total_variation(draft_logits, target_logits)
                 l1_dist = 2.0 * tv
@@ -478,8 +452,6 @@ class DSparkTrainingModel(DFlashTrainingModel):
                 if l1_enabled:
                     l1_dist = (draft_probs - target_probs).abs().sum(dim=-1)
                 else:
-                    # Confidence-only: the varying part is discarded, so skip
-                    # building an autograd graph for the eager L1 distance.
                     with torch.no_grad():
                         l1_dist = (draft_probs - target_probs).abs().sum(dim=-1)
                 probabilistic_target = (1.0 - 0.5 * l1_dist).clamp(0.0, 1.0)
@@ -488,15 +460,7 @@ class DSparkTrainingModel(DFlashTrainingModel):
                 l1_sum = l1_sum + (l1_dist * weights_chunk).sum()
 
             if confidence_enabled:
-                # The head must predict the acceptance the *served* proposal
-                # mode yields. 'probabilistic' drafting samples the draft
-                # softmax, so acceptance = sum_v min(p_draft, p_target) = 1-TV.
-                # 'greedy' drafting (the serving default) proposes
-                # argmax(p_draft) and the rejection sampler treats the draft as
-                # one-hot, so acceptance collapses to p_target[argmax(p_draft)].
                 if self.confidence_target_mode == "greedy":
-                    # argmax is invariant to the softmax, so reuse draft_probs
-                    # when present (eager) and fall back to the logits (fused).
                     draft_source = (
                         draft_probs if draft_probs is not None else draft_logits
                     )
@@ -539,9 +503,6 @@ class DSparkTrainingModel(DFlashTrainingModel):
                     ).sum()
                 )
                 conf_den = conf_den + confidence_weights.sum()
-                # Weight the acceptance and prediction diagnostics by the same
-                # finite-token mask as the loss so ``accept_sum / conf_den`` and
-                # ``pred_sum / conf_den`` stay valid weighted means.
                 accept_sum = accept_sum + (acceptance_target * confidence_weights).sum()
                 pred_sum = (
                     pred_sum
@@ -551,6 +512,8 @@ class DSparkTrainingModel(DFlashTrainingModel):
                     ).sum()
                 )
         return l1_sum, l1_den, conf_sum, conf_den, accept_sum, pred_sum
+
+
 
     def _should_debug_log(self) -> bool:
         if not self.debug_log:
