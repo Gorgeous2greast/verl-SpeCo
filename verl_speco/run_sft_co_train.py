@@ -99,9 +99,13 @@ def main(config):
 
     # ========== 训练配置 ==========
     config.data.train_batch_size = config.data.get("train_batch_size") or 16
-    config.data.micro_batch_size_per_gpu = config.data.get("micro_batch_size_per_gpu") or 1
+    config.data.micro_batch_size_per_gpu = (
+        config.data.get("micro_batch_size_per_gpu") or 1
+    )
     config.data.max_token_len_per_gpu = config.data.get("max_token_len_per_gpu") or 4096
-    config.trainer.total_training_steps = config.trainer.get("total_training_steps") or 0
+    config.trainer.total_training_steps = (
+        config.trainer.get("total_training_steps") or 0
+    )
     config.trainer.total_epochs = config.trainer.get("total_epochs") or 1
     config.trainer.n_gpus_per_node = config.trainer.get("n_gpus_per_node") or 1
     config.trainer.nnodes = config.trainer.get("nnodes") or 1
@@ -113,9 +117,13 @@ def main(config):
     config.trainer.test_freq = config.trainer.get("test_freq") or 0
     config.trainer.logger = config.trainer.get("logger") or ["console", "wandb"]
     config.trainer.project_name = config.trainer.get("project_name") or "sft_cotrain"
-    config.trainer.experiment_name = config.trainer.get("experiment_name") or "sft_cotrain"
-    config.trainer.default_local_dir = config.trainer.get("default_local_dir") or "checkpoints/sft_cotrain"
-    
+    config.trainer.experiment_name = (
+        config.trainer.get("experiment_name") or "sft_cotrain"
+    )
+    config.trainer.default_local_dir = (
+        config.trainer.get("default_local_dir") or "checkpoints/sft_cotrain"
+    )
+
     # ========== 数据格式配置 ==========
     config.model.use_remove_padding = True
     config.data.pad_mode = "no_padding"
@@ -128,51 +136,56 @@ def main(config):
 
     # ========== 实验类型 & 算法 ==========
     experiment_type = config.get("experiment_type", "cotrain")
-    speculative_algorithm = str(config.rollout.drafter.get("speculative_algorithm", "DSPARK")).upper()
-    enable_co_train = (experiment_type == "cotrain")
+    speculative_algorithm = str(
+        config.rollout.drafter.get("speculative_algorithm", "DSPARK")
+    ).upper()
+    enable_co_train = experiment_type == "cotrain"
 
     # ========== speco.sft_specific 配置（drafter 开关的唯一数据源）==========
-    if not hasattr(config, 'speco'):
+    if not hasattr(config, "speco"):
         with open_dict(config):
             config.speco = OmegaConf.create({})
     with open_dict(config.speco):
         config.speco.mode = "sft"
-        if not hasattr(config.speco, 'sft_specific') or config.speco.sft_specific is None:
+        if (
+            not hasattr(config.speco, "sft_specific")
+            or config.speco.sft_specific is None
+        ):
             config.speco.sft_specific = OmegaConf.create({})
         sft_specific = config.speco.sft_specific
         # 唯一的 drafter 训练开关，其他位置自动同步于此
-        if getattr(sft_specific, 'enable_drafter_training', None) is None:
+        if getattr(sft_specific, "enable_drafter_training", None) is None:
             sft_specific.enable_drafter_training = enable_co_train
-        if getattr(sft_specific, 'drafter_train_interval', None) is None:
+        if getattr(sft_specific, "drafter_train_interval", None) is None:
             sft_specific.drafter_train_interval = 5
-        if getattr(sft_specific, 'max_samples_per_step', None) is None:
+        if getattr(sft_specific, "max_samples_per_step", None) is None:
             sft_specific.max_samples_per_step = 200
-        if getattr(sft_specific, 'hidden_layer_id', None) is None:
+        if getattr(sft_specific, "hidden_layer_id", None) is None:
             sft_specific.hidden_layer_id = -1
-        if getattr(sft_specific, 'publish_during_sft', None) is None:
+        if getattr(sft_specific, "publish_during_sft", None) is None:
             sft_specific.publish_during_sft = False
-        if getattr(sft_specific, 'checkpoint_save_dir', None) in (None, ""):
+        if getattr(sft_specific, "checkpoint_save_dir", None) in (None, ""):
             sft_specific.checkpoint_save_dir = "checkpoints/sft_cotrain/drafter"
-    
+
     print("=" * 60)
     print(f"SPECO SFT - Experiment: {experiment_type}")
     print(f"Co-train enabled: {enable_co_train}")
     print("=" * 60)
 
     # ========== rollout.drafter 配置（从 speco.sft_specific 同步）==========
-    if not hasattr(config, 'rollout'):
+    if not hasattr(config, "rollout"):
         with open_dict(config):
             config.rollout = OmegaConf.create({})
 
     with open_dict(config.rollout):
-        if not hasattr(config.rollout, 'tensor_model_parallel_size'):
+        if not hasattr(config.rollout, "tensor_model_parallel_size"):
             config.rollout.tensor_model_parallel_size = 1
-        if not hasattr(config.rollout, 'data_parallel_size'):
+        if not hasattr(config.rollout, "data_parallel_size"):
             config.rollout.data_parallel_size = 1
-        if not hasattr(config.rollout, 'pipeline_model_parallel_size'):
+        if not hasattr(config.rollout, "pipeline_model_parallel_size"):
             config.rollout.pipeline_model_parallel_size = 1
 
-    if not hasattr(config.rollout, 'drafter'):
+    if not hasattr(config.rollout, "drafter"):
         with open_dict(config.rollout):
             config.rollout.drafter = OmegaConf.create({})
 
@@ -188,7 +201,7 @@ def main(config):
         config.rollout.drafter.checkpoint_path = _drafter_ckpt_dir
         if not config.rollout.drafter.get("model_path"):
             config.rollout.drafter.model_path = ""
-    
+
     # ========== drafter.training 配置 ==========
     with open_dict(config.rollout.drafter.training):
         config.rollout.drafter.training.enable = _enable_drafter
@@ -197,20 +210,30 @@ def main(config):
         config.rollout.drafter.training.collect_hidden_states_from_sgl = False
 
         if speculative_algorithm == "DSPARK":
-            if getattr(config.rollout.drafter.training, "dspark_l1_loss_alpha", None) is None:
+            if (
+                getattr(config.rollout.drafter.training, "dspark_l1_loss_alpha", None)
+                is None
+            ):
                 config.rollout.drafter.training.dspark_l1_loss_alpha = 0.9
-            if getattr(config.rollout.drafter.training, "dspark_num_target_layers", None) is None:
+            if (
+                getattr(
+                    config.rollout.drafter.training, "dspark_num_target_layers", None
+                )
+                is None
+            ):
                 config.rollout.drafter.training.dspark_num_target_layers = 5
             if not hasattr(config.rollout.drafter.training, "dspark_target_layer_ids"):
                 config.rollout.drafter.training.dspark_target_layer_ids = None
 
-        config.rollout.drafter.training.fsdp_config = OmegaConf.create({
-            "param_offload": True,
-            "optimizer_offload": True,
-            "use_orig_params": True,
-            "forward_prefetch": False,
-            "wrap_policy": OmegaConf.create({"min_num_params": 0}),
-        })
+        config.rollout.drafter.training.fsdp_config = OmegaConf.create(
+            {
+                "param_offload": True,
+                "optimizer_offload": True,
+                "use_orig_params": True,
+                "forward_prefetch": False,
+                "wrap_policy": OmegaConf.create({"min_num_params": 0}),
+            }
+        )
 
         config.rollout.drafter.training.training_batch_size = 8
         config.rollout.drafter.training.micro_batch_size = 8
@@ -224,13 +247,15 @@ def main(config):
         config.rollout.drafter.training.is_offload_optimizer = True
 
     # ========== sft_drafter 配置（从 sft_specific 同步）==========
-    if not hasattr(config, 'sft_drafter'):
+    if not hasattr(config, "sft_drafter"):
         with open_dict(config):
             config.sft_drafter = OmegaConf.create({})
     with open_dict(config.sft_drafter):
         config.sft_drafter.enable_training = _enable_drafter
         config.sft_drafter.train_interval = _drafter_train_interval
-        config.sft_drafter.max_samples_per_step = int(config.speco.sft_specific.max_samples_per_step)
+        config.sft_drafter.max_samples_per_step = int(
+            config.speco.sft_specific.max_samples_per_step
+        )
 
     # ========== 打印配置摘要 ==========
     print("=" * 60)
@@ -247,21 +272,49 @@ def main(config):
     print(f"Save freq: {config.trainer.save_freq}")
     print(f"Test freq: {config.trainer.test_freq}")
     # drafter 关键参数验证
-    _drafter_cfg = getattr(config, 'rollout', None)
-    _drafter_cfg = getattr(_drafter_cfg, 'drafter', None) if _drafter_cfg is not None else None
-    _drafter_ckpt = getattr(_drafter_cfg, 'checkpoint_path', None) if _drafter_cfg is not None else None
-    _drafter_enable = getattr(_drafter_cfg, 'enable_drafter_training', None) if _drafter_cfg is not None else None
-    _sft_specific = getattr(getattr(config, 'speco', None), 'sft_specific', None) if getattr(config, 'speco', None) is not None else None
-    _sft_enable_drafter = getattr(_sft_specific, 'enable_drafter_training', None) if _sft_specific is not None else None
-    _sft_ckpt_save_dir = getattr(_sft_specific, 'checkpoint_save_dir', None) if _sft_specific is not None else None
+    _drafter_cfg = getattr(config, "rollout", None)
+    _drafter_cfg = (
+        getattr(_drafter_cfg, "drafter", None) if _drafter_cfg is not None else None
+    )
+    _drafter_ckpt = (
+        getattr(_drafter_cfg, "checkpoint_path", None)
+        if _drafter_cfg is not None
+        else None
+    )
+    _drafter_enable = (
+        getattr(_drafter_cfg, "enable_drafter_training", None)
+        if _drafter_cfg is not None
+        else None
+    )
+    _sft_specific = (
+        getattr(getattr(config, "speco", None), "sft_specific", None)
+        if getattr(config, "speco", None) is not None
+        else None
+    )
+    _sft_enable_drafter = (
+        getattr(_sft_specific, "enable_drafter_training", None)
+        if _sft_specific is not None
+        else None
+    )
+    _sft_ckpt_save_dir = (
+        getattr(_sft_specific, "checkpoint_save_dir", None)
+        if _sft_specific is not None
+        else None
+    )
     print(f"[Drafter] rollout.drafter.checkpoint_path = {_drafter_ckpt!r}")
     print(f"[Drafter] rollout.drafter.enable_drafter_training = {_drafter_enable!r}")
-    print(f"[Drafter] speco.sft_specific.enable_drafter_training = {_sft_enable_drafter!r}")
+    print(
+        f"[Drafter] speco.sft_specific.enable_drafter_training = {_sft_enable_drafter!r}"
+    )
     print(f"[Drafter] speco.sft_specific.checkpoint_save_dir = {_sft_ckpt_save_dir!r}")
     if not _drafter_ckpt:
-        print("[WARNING] rollout.drafter.checkpoint_path is EMPTY/None! Drafter will NOT be saved!")
+        print(
+            "[WARNING] rollout.drafter.checkpoint_path is EMPTY/None! Drafter will NOT be saved!"
+        )
     if not _sft_ckpt_save_dir:
-        print("[WARNING] speco.sft_specific.checkpoint_save_dir is EMPTY/None! Final drafter save will be skipped!")
+        print(
+            "[WARNING] speco.sft_specific.checkpoint_save_dir is EMPTY/None! Final drafter save will be skipped!"
+        )
     print("=" * 60)
 
     model_path = config.model.path
@@ -286,16 +339,17 @@ def main(config):
     print(f"Train dataset size: {len(train_dataset)}")
 
     speco_worker_cls = None
-    if hasattr(config, 'speco') and hasattr(config.speco, 'sft_specific'):
+    if hasattr(config, "speco") and hasattr(config.speco, "sft_specific"):
         sft_specific = config.speco.sft_specific
-        if getattr(sft_specific, 'enable_drafter_training', False):
+        if getattr(sft_specific, "enable_drafter_training", False):
             try:
                 from verl_speco.workers import SpecoWorker
+
                 speco_worker_cls = ray.remote(SpecoWorker)
                 logger.info("SpecoWorker created")
             except ImportError as e:
                 logger.warning(f"SpecoWorker import failed: {e}")
-            
+
             print("\nCreating SpecoRaySFTRayTrainer...")
     trainer = SpecoRaySFTRayTrainer(
         config=config,
@@ -310,7 +364,7 @@ def main(config):
     print("\n" + "=" * 60)
     print("Starting SFT co-train...")
     print("=" * 60)
-    
+
     try:
         trainer.fit()
         print("\n" + "=" * 60)
@@ -322,6 +376,7 @@ def main(config):
 
         traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
