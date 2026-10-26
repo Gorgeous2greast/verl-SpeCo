@@ -201,6 +201,11 @@ def test_worker_retains_error_when_second_batch_succeeds():
         async def cleanup_training(self, **kwargs):
             pass
 
+        def get_training_data_stats(self):
+            return {"buffer_total": 2, "eligible_samples": 2}
+        def release_training_data_reservation(self, plan_id):
+            return 0
+
         def get_training_data_status(self, **kwargs):
             return {"trainable_samples": 0}
 
@@ -208,12 +213,19 @@ def test_worker_retains_error_when_second_batch_succeeds():
         rank=0,
         worker_incarnation="worker-0",
         is_global_publish_leader=True,
+        is_drafter_group_leader=False,
         enable_drafter=True,
         in_drafter_train_group=True,
         trainer=Trainer(),
         _prepared_training_plan_id="plan",
         _prepared_training_data_version=1,
         _prepared_training_target_version=1,
+        _prepared_training_activation_elapsed_sec=0.0,
+        _prepared_training_preflight_elapsed_sec=0.0,
+        _prepared_training_ready_ts=None,
+        _drafter_reclaim_requested=False,
+        _reclaim_control_lock=nullcontext,
+        _should_keep_drafter_training_hot=lambda *args, **kwargs: False,
         last_global_step=1,
         device_name="cpu",
     )
@@ -221,7 +233,11 @@ def test_worker_retains_error_when_second_batch_succeeds():
         "verl_speco/workers/speco_worker.py",
         "SpecoWorker",
         "train_drafter",
-        {"time": time, "_preserve_process_rng_state": lambda device: nullcontext()},
+        {
+            "time": time,
+            "logger": logging.getLogger(__name__),
+            "_preserve_process_rng_state": lambda device: nullcontext(),
+        },
     )
     plan = {
         "plan_id": "plan",
@@ -233,6 +249,8 @@ def test_worker_retains_error_when_second_batch_succeeds():
     result = asyncio.run(method(worker, plan))
     assert result["trained"] is True
     assert result["successful_steps"] == 1
+    assert result["train_buffer_total"] == 2
+    assert result["train_eligible_samples"] == 2
     assert result["errors"] == [
         {"type": "RuntimeError", "message": "first batch failed"}
     ]
@@ -242,7 +260,9 @@ def test_worker_retains_error_when_second_batch_succeeds():
         validate_result(evidence.data, training=True)
 
 
-def test_fit_writes_evidence_after_normal_exit(tmp_path, monkeypatch):
+@pytest.mark.parametrize("v1", [False, True])
+@pytest.mark.parametrize("failed", [False, True])
+def test_fit_writes_evidence_after_exit(tmp_path, monkeypatch, v1, failed):
     path = tmp_path / "result.json"
     monkeypatch.setenv("SPECO_CI_RESULT_PATH", str(path))
     trainer = SimpleNamespace(
@@ -260,18 +280,40 @@ def test_fit_writes_evidence_after_normal_exit(tmp_path, monkeypatch):
                 "drafter/published": 1,
             }
         )
+        if failed:
+            raise RuntimeError("fit failed")
         return "finished"
 
-    trainer._speco_fit_impl = run
+    trainer._speco_fit_impl = lambda *args: run()
+    source = "verl_speco/trainer/speco_ray_trainer.py"
+    cls = "SpecoRayPPOTrainer"
+    args = ()
+    if v1:
+        from verl_speco.trainer.v1.speco_mixin import SpecoV1Mixin
+
+        trainer._speco_online_enabled_from_config = lambda config: True
+        trainer._speco_init_ci_result = lambda: SpecoV1Mixin._speco_init_ci_result(
+            trainer
+        )
+        source = "verl_speco/trainer/v1/speco_mixin.py"
+        cls = "SpecoV1Mixin"
+        args = (object(),)
     fit = _method(
-        "verl_speco/trainer/speco_ray_trainer.py",
-        "SpecoRayPPOTrainer",
+        source,
+        cls,
         "fit",
         {"os": os},
     )
-    assert fit(trainer) == "finished"
+    if failed:
+        with pytest.raises(RuntimeError, match="fit failed"):
+            fit(trainer, *args)
+    else:
+        assert fit(trainer, *args) == "finished"
     data = json.loads(path.read_text())
-    assert data["completed"] is True
+    assert data["completed"] is (not failed)
+    assert data["optimizer_steps"] == data["publications"] == 1
+    if failed:
+        assert data["errors"][-1] == {"type": "RuntimeError", "message": "fit failed"}
     with pytest.raises(ValueError, match="suppressed"):
         validate_result(data, training=True)
 

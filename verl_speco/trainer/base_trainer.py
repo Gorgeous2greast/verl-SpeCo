@@ -4968,6 +4968,16 @@ class DrafterBaseTrainer:
                 available_data = self.data_buffer.get_data_from_last_n_steps(
                     buffer_steps
                 )
+            else:
+                # Use data from last N RL steps via DataBuffer
+                buffer_steps = int(
+                    self.config.rollout.drafter.training.get(
+                        "sample_last_n_steps", buffer_steps
+                    )
+                )
+                available_data = self.data_buffer.get_data_from_last_n_steps(
+                    buffer_steps
+                )
             if len(available_data) < effective_batch_size:
                 if len(available_data) >= min_items_for_batch:
                     items = available_data

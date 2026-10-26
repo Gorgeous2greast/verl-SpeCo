@@ -276,6 +276,8 @@ def test_standalone_global_loss_and_selector_aggregation(prefix):
             f"{prefix}/selector_token_count": 15.0,
         },
         _training_metric_steps=2, optimizer_steps_total=10, optimizer=None,
+        _training_sample_draws=6,
+        _training_unique_sample_ids={1, 2, 3},
         _block_drafter_metric_prefix=lambda: prefix,
         _block_drafter_config_value=lambda name, default: 0,
     )
@@ -283,6 +285,8 @@ def test_standalone_global_loss_and_selector_aggregation(prefix):
     assert metrics[f"{prefix}/loss"] == 3.0
     assert metrics[f"{prefix}/selector_loss"] == 0.4
     assert metrics[f"{prefix}/selector_accuracy"] == 0.6
+    assert metrics["drafter/train_sample_draws"] == 6.0
+    assert metrics["drafter/train_unique_samples"] == 3.0
 
 
 @pytest.mark.parametrize("prefix", ["eagle3", "dflash", "dspark", "dflash2"])
@@ -446,6 +450,7 @@ def test_standalone_base_writer_defers_completion_marker(monkeypatch, tmp_path) 
         _is_checkpoint_leader=lambda: True,
         _get_pretrained_export_model=lambda: (_ExportModel(), None),
         _get_pretrained_export_state_dict=lambda: {"weight": torch.ones(1)},
+        _speco_checkpoint_buffer_state=lambda: None,
         _infer_pretrained_save_kwargs=lambda: {},
         _clear_existing_pretrained_weight_files=lambda path: None,
         _copy_drafter_auxiliary_files=lambda path: None,
