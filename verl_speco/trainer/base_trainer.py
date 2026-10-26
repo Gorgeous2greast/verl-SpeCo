@@ -5075,6 +5075,9 @@ class DrafterBaseTrainer:
 
         current_step = int(self.current_rl_step)
         use_logits = bool(self.config.rollout.drafter.training.get("use_logits", False))
+        allow_cross_step_hidden = bool(
+            self.config.rollout.drafter.training.get("allow_cross_step_hidden", False)
+        )
         dspark_uses_last_hidden = (
             self.backend.model_type == "dspark"
             and float(self.config.rollout.drafter.training.get("dspark_l1_loss_alpha", 0.0)) > 0
@@ -5082,6 +5085,7 @@ class DrafterBaseTrainer:
         same_step_data_required = (
             (self.backend.model_type == "eagle3" or dspark_uses_last_hidden)
             and not use_logits
+            and not allow_cross_step_hidden
         )
         current_step_data = [
             item

@@ -245,8 +245,6 @@ class SpecoTrainingWorker(TrainingWorker):
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def export_lm_head_weight_for_drafter(self, row_indices=None):
         """Export current target model's lm_head weight for drafter backend sync."""
-        import sys
-
         try:
             torch = __import__("torch")
 
@@ -291,10 +289,8 @@ class SpecoTrainingWorker(TrainingWorker):
                     selected_name = "lm_head.weight"
 
             if selected_weight is None:
-                print(
-                    "[SpecoTrainingWorker] export_lm_head_weight: FAILED - no lm_head found",
-                    file=sys.stderr,
-                    flush=True,
+                logger.error(
+                    "[SpecoTrainingWorker] export_lm_head_weight: FAILED - no lm_head found"
                 )
                 return None
 
@@ -341,10 +337,8 @@ class SpecoTrainingWorker(TrainingWorker):
                 if target_dtype is not None and selected_weight.dtype != target_dtype:
                     selected_weight = selected_weight.to(target_dtype)
             except Exception as _dtype_err:
-                print(
-                    f"[SpecoTrainingWorker] dtype detection error (non-fatal): {_dtype_err}",
-                    file=sys.stderr,
-                    flush=True,
+                logger.warning(
+                    f"[SpecoTrainingWorker] dtype detection error (non-fatal): {_dtype_err}"
                 )
 
             payload = {
@@ -360,19 +354,15 @@ class SpecoTrainingWorker(TrainingWorker):
                 and row_indices.numel() > 0
                 else "full",
             }
-            print(
-                f"[SpecoTrainingWorker] export_lm_head_weight: OK shape={tuple(payload['weight'].shape)} name={selected_name}",
-                file=sys.stderr,
-                flush=True,
+            logger.debug(
+                f"[SpecoTrainingWorker] export_lm_head_weight: OK shape={tuple(payload['weight'].shape)} name={selected_name}"
             )
             return payload
         except Exception as e:
             import traceback
 
-            print(
-                f"[SpecoTrainingWorker] export_lm_head_weight: ERROR {e}",
-                file=sys.stderr,
-                flush=True,
+            logger.error(
+                f"[SpecoTrainingWorker] export_lm_head_weight: ERROR {e}"
             )
             traceback.print_exc()
             return None

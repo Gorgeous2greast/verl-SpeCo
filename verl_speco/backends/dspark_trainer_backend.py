@@ -114,6 +114,19 @@ class DSparkTrainingModel(DFlashTrainingModel):
             raise ValueError(
                 "distribution_loss_impl must be one of: auto, fused, eager"
             )
+        self.ce_target_source = str(
+            ce_target_source or _CE_TARGET_SOURCE_LABELS
+        ).lower()
+        if self.ce_target_source not in _CE_TARGET_SOURCES:
+            raise ValueError(
+                "ce_target_source must be one of: "
+                f"{', '.join(sorted(_CE_TARGET_SOURCES))}"
+            )
+        self.confidence_target_mode = str(confidence_target_mode or "greedy").lower()
+        if self.confidence_target_mode not in {"greedy", "probabilistic"}:
+            raise ValueError(
+                "dspark_confidence_target_mode must be one of: greedy, probabilistic"
+            )
         self._logged_distribution_loss_backend: str | None = None
         self._distribution_loss_by_device: dict[str, bool] = {}
         confidence_head = getattr(self.draft_model, "confidence_head", None)

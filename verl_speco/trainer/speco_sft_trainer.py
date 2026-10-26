@@ -633,14 +633,14 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
         interval = self._speco_drafter_train_interval()
         if interval <= 0:
             if global_step <= 5:
-                logger.warning(
+                logger.info(
                     f"[Drafter Trigger] Step {global_step}: interval={interval} <= 0, SKIP drafter training"
                 )
             return False
 
         should_train = global_step % interval == 0
         if global_step <= 5 or should_train:
-            logger.warning(
+            logger.info(
                 f"[Drafter Trigger] Step {global_step}: interval={interval}, global_step % interval = {global_step % interval}, should_train={should_train}"
             )
         return should_train
@@ -960,7 +960,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                     try:
                         hidden_tensor = ray.get(hidden_ref)
                     except Exception as e:
-                        logger.warning(
+                        logger.debug(
                             f"[VERIFY-C] Failed to get hidden ref for sample {batch_idx}: {e}"
                         )
                         continue
@@ -970,7 +970,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                     # 必须用 meta 切分，不能用 positions（SEQ 绝对位置）索引 chunk！
                     if ref_meta is None:
                         # ref_meta 缺失 = 无法正确切分 chunk，硬兜底：跳过防止错位
-                        logger.warning(
+                        logger.debug(
                             f"[VERIFY-REF] batch_idx={batch_idx}: ref_meta is None, "
                             f"无法切分 chunk，跳过样本以防止跨样本 hidden 错位"
                         )
@@ -982,7 +982,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         or chunk_start + chunk_length > hidden_tensor.size(0)
                     ):
                         # chunk_length 无效或切分越界，硬兜底：跳过
-                        logger.warning(
+                        logger.debug(
                             f"[VERIFY-REF] batch_idx={batch_idx}: chunk 切分参数无效 "
                             f"start={chunk_start} length={chunk_length} "
                             f"tensor_rows={hidden_tensor.size(0)}，跳过样本"
@@ -1018,19 +1018,19 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         else None
                     )
                     if raw_h is None:
-                        logger.warning(
+                        logger.debug(
                             f"[VERIFY-C] batch_idx={batch_idx}: raw hidden_states is None"
                         )
                         continue
                     hidden_tensor = raw_h[:n_valid]
                 else:
-                    logger.warning(
+                    logger.debug(
                         f"[VERIFY-C] batch_idx={batch_idx}: both hidden_ref and hidden_states are None"
                     )
                     continue
 
                 if hidden_tensor is None:
-                    logger.warning(
+                    logger.debug(
                         f"[VERIFY-C] batch_idx={batch_idx}: hidden_tensor is None after retrieval"
                     )
                     continue
@@ -1041,7 +1041,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 actual_rows = hidden_tensor.size(0)
                 if actual_rows < n_valid:
                     # SP/owner_mask 过滤导致部分行不在当前 rank → 正常现象，容错处理
-                    logger.warning(
+                    logger.debug(
                         f"[VERIFY-D-ADAPT] batch_idx={batch_idx}: hidden_tensor rows ({actual_rows}) < n_valid ({n_valid}), "
                         f"SP/owner_mask 过滤，使用实际行数"
                     )
@@ -1053,7 +1053,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 if batch_idx < 2:
                     with torch.no_grad():
                         ht = hidden_tensor.float()
-                        logger.warning(
+                        logger.debug(
                             f"[DIAG-HIDDEN] batch={batch_idx} shape={tuple(ht.shape)} "
                             f"mean={ht.mean().item():.6f} std={ht.std().item():.6f} "
                             f"min={ht.min().item():.4f} max={ht.max().item():.4f} "
@@ -1062,7 +1062,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         )
                         # 打印 hidden 的前 3 行前 10 维
                         first_rows = ht[:3, :10].cpu().tolist()
-                        logger.warning(
+                        logger.debug(
                             f"[DIAG-HIDDEN] batch={batch_idx} first_3_rows_first_10={first_rows}"
                         )
 
@@ -1086,7 +1086,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                     # 关键断言：chunk_length 应该 >= n_valid
                     # 如果不等，说明 meta 信息和实际 valid_rows 不一致
                     if chunk_length_val != n_valid:
-                        logger.warning(
+                        logger.debug(
                             f"[SANITY-MISMATCH] batch={batch_idx}: "
                             f"chunk_length={chunk_length_val} != n_valid={n_valid}! "
                             f"chunk_start={chunk_start_val}"
@@ -1243,7 +1243,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
             if collected_count > 0:
                 # 发送到 SpecoWorker
                 # buckets 已经是 list[list[dict]] 格式，与 PPO 模式一致
-                logger.warning(
+                logger.debug(
                     f"[_speco_collect_sft_features] Sending {len(buckets)} buckets with {collected_count} samples"
                 )
                 self.speco_collect_rollout_features(buckets)
@@ -1395,6 +1395,14 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
     def _speco_fit_with_hooks(self):
         """带 SPECO hooks 的训练循环。
+
+        .. warning::
+            This method is a **copy of the upstream ``SFTTrainer.fit()`` training
+            loop** (from ``verl/trainer/sft_trainer.py``) with SPECO-specific
+            hooks injected (collect plan, lm_head sync, drafter training).
+            When upstream ``SFTTrainer.fit()`` is updated (resume/val/profiling
+            fixes, etc.), this method MUST be re-synced manually.
+            Last reviewed against upstream: verl-SpeCo main branch.
 
         在原生 SFT 训练循环的每个 step 中：
         1. 构建 collect plan
@@ -1607,11 +1615,11 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                 should_train_drafter = self._speco_should_train_drafter_this_step(
                     global_step
                 )
+                _synced = False
                 if should_train_drafter:
                     import time as _time
 
                     _sync_start = _time.perf_counter()
-                    _synced = False
                     logger.warning(
                         f"[LM-HEAD-SYNC] Step {global_step}: SYNC BEFORE train_batch (correct timing)"
                     )
@@ -1670,7 +1678,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
                             if payload is not None:
                                 w = payload.get("weight")
-                                logger.warning(
+                                logger.debug(
                                     f"[LM-HEAD-SYNC] Exported lm_head: shape={tuple(w.shape) if hasattr(w, 'shape') else 'unknown'}"
                                 )
                                 _sync_result = self._ray_get_if_needed(
@@ -1679,12 +1687,13 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                                     )
                                 )
                                 _synced = True
-                                logger.warning(
+                                logger.info(
                                     f"[LM-HEAD-SYNC] Sync OK: {_sync_result}"
                                 )
                             else:
-                                logger.warning(
-                                    "[LM-HEAD-SYNC] Export returned None (OK on non-rank-0)"
+                                logger.error(
+                                    f"[LM-HEAD-SYNC] Step {global_step}: Export returned None even on rank0 — lm_head sync FAILED. "
+                                    "Skipping drafter training for this step."
                                 )
                         except Exception as e_export:
                             logger.warning(
@@ -1695,7 +1704,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                         logger.warning(f"[LM-HEAD-SYNC] Sync block error: {e_sync}")
 
                     _sync_elapsed = _time.perf_counter() - _sync_start
-                    logger.warning(
+                    logger.info(
                         f"[LM-HEAD-SYNC] Step {global_step}: synced={_synced}, elapsed={_sync_elapsed:.3f}s"
                     )
 
@@ -1749,7 +1758,12 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
                 # === SPECO: 按间隔触发 drafter 训练 ===
                 # lm_head 已在 train_batch 之前同步 ✅
-                if should_train_drafter:
+                if should_train_drafter and not _synced:
+                    logger.error(
+                        f"[Drafter Training] Step {global_step}: SKIPPED because lm_head sync failed (_synced=False). "
+                        "SFT training continues, but drafter supervision for this step is skipped to avoid stale head."
+                    )
+                if should_train_drafter and _synced:
                     logger.warning(f"{'=' * 60}")
                     logger.warning(
                         f"[Drafter Training] Step {global_step}: STARTING (lm_head synced before train_batch)"
@@ -1775,9 +1789,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
 
                 metrics = tu.get(output, "metrics")
                 if should_train_drafter:
-                    metrics["drafter/target_lm_head_synced"] = int(
-                        _synced if "_synced" in dir() else 0
-                    )
+                    metrics["drafter/target_lm_head_synced"] = int(_synced)
                 metrics["train/loss"] = metrics.pop("loss")
                 metrics["train/grad_norm"] = metrics.pop("grad_norm")
                 metrics["train/lr"] = metrics.pop("lr")

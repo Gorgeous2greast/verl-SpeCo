@@ -2,10 +2,10 @@
 # SFT Co-Train: Qwen3-4B + DSPARK drafter (从预训练 drafter 继续训练)
 #
 # 用法:
-#   bash examples/run_qwen3-4b_drafter_dspark_sft_cotrain.sh
+#   bash examples/run_qwen3-4b_actor_fsdp_drafter_dspark_sft.sh
 #
 # 可通过环境变量覆盖默认值，例如:
-#   N_GPUS_PER_NODE=4 TOTAL_TRAINING_STEPS=500 bash examples/run_qwen3-4b_drafter_dspark_sft_cotrain.sh
+#   N_GPUS_PER_NODE=4 TOTAL_TRAINING_STEPS=500 bash examples/run_qwen3-4b_actor_fsdp_drafter_dspark_sft.sh
 set -euo pipefail
 set -x
 
@@ -13,15 +13,15 @@ project_name=${PROJECT_NAME:-verl_sft_cotrain}
 exp_name=${EXP_NAME:-qwen3_4b_dspark_sft_cotrain}
 
 # ===== 路径配置 =====
-VERL_ROOT=${VERL_ROOT:-/model/sft_cotrain/verl}
-MODEL_PATH=${MODEL_PATH:-/nas/disk1/Qwen3-4B}
+VERL_ROOT=${VERL_ROOT:-/path/to/verl}
+MODEL_PATH=${MODEL_PATH:-/path/to/Qwen3-4B}
 # 预训练好的 DSPARK drafter（block_size=7）
-DRAFTER_PATH=${DRAFTER_PATH:-/model/ljh/model/dspark_qwen3_4b_block7}
+DRAFTER_MODEL_PATH=${DRAFTER_MODEL_PATH:-/path/to/pretrained_dspark_drafter}
 # 训练/验证数据（parquet 格式，含 messages 列）
-TRAIN_FILE=${TRAIN_FILE:-/model/sft_cotrain/verl-SpeCo/test_data/gsm8k_sft_train_fixed.parquet}
-TEST_FILE=${TEST_FILE:-/model/sft_cotrain/verl-SpeCo/test_data/gsm8k_sft_test_fixed.parquet}
+TRAIN_FILE=${TRAIN_FILE:-/path/to/train.parquet}
+TEST_FILE=${TEST_FILE:-/path/to/test.parquet}
 # SFT 模型 checkpoint 保存目录（含 hf_model 时会同时导出 HF 格式到子目录 huggingface/）
-CKPTS_DIR=${CKPTS_DIR:-/model/sft_cotrain/verl-SpeCo-latest/checkpoints/qwen3_4b_dspark_cotrain}
+CKPTS_DIR=${CKPTS_DIR:-/path/to/checkpoint}
 # drafter 模型保存目录
 DRAFTER_CKPT_DIR=${DRAFTER_CKPT_DIR:-${CKPTS_DIR}/drafter}
 
@@ -32,7 +32,12 @@ SFT_LR=${SFT_LR:-2e-5}
 # drafter 学习率（继续训练用较小 lr）
 DRAFTER_LR=${DRAFTER_LR:-1e-5}
 
+# ===== 实验模式 =====
+# "cotrain" = SFT + drafter 联合训练; "sft_only" = 仅 SFT（不训练 drafter）
+EXPERIMENT_TYPE=${EXPERIMENT_TYPE:-cotrain}
+
 # ===== 训练规模 =====
+IGNORE_INPUT_IDS_MISMATCH=${IGNORE_INPUT_IDS_MISMATCH:-true}
 N_GPUS_PER_NODE=${N_GPUS_PER_NODE:-2}
 N_NODES=${N_NODES:-1}
 TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-16}
@@ -63,13 +68,16 @@ DSPARK_LOSS_DECAY_GAMMA=${DSPARK_LOSS_DECAY_GAMMA:-7}
 DSPARK_MAX_WINDOW=${DSPARK_MAX_WINDOW:-512}
 DSPARK_MASK_TOKEN_ID=${DSPARK_MASK_TOKEN_ID:-151669}
 
-#speco目录
-SPECO_ROOT=${SPECO_ROOT:-/model/sft_cotrain/verl-SpeCo}
-
 # ===== 路径校验 =====
 if [[ "${MODEL_PATH}" == /path/to/* || "${TRAIN_FILE}" == /path/to/* ]]; then
     echo "Set MODEL_PATH and TRAIN_FILE before starting training." >&2
     exit 2
+fi
+
+# 如果设置了预训练 drafter 路径，则通过 actor_rollout_ref.rollout.drafter.model_path 传入
+DRAFTER_PATH_ARG=""
+if [[ -n "${DRAFTER_MODEL_PATH}" && "${DRAFTER_MODEL_PATH}" != /path/to/* ]]; then
+    DRAFTER_PATH_ARG="actor_rollout_ref.rollout.drafter.model_path=${DRAFTER_MODEL_PATH}"
 fi
 
 # ===== 配置回显 =====
@@ -77,7 +85,7 @@ echo "========================================"
 echo "  SFT Co-Train Configuration (DSPARK)"
 echo "========================================"
 echo "  MODEL_PATH         = ${MODEL_PATH}"
-echo "  DRAFTER_PATH       = ${DRAFTER_PATH}"
+echo "  DRAFTER_MODEL_PATH = ${DRAFTER_MODEL_PATH}"
 echo "  SFT_LR             = ${SFT_LR}"
 echo "  DRAFTER_LR         = ${DRAFTER_LR}"
 echo "  CKPTS_DIR (SFT)    = ${CKPTS_DIR}"
@@ -86,8 +94,8 @@ echo "  SAVE_FREQ          = ${SAVE_FREQ}"
 echo "  N_GPUS_PER_NODE    = ${N_GPUS_PER_NODE}"
 echo "========================================"
 
-# SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# SPECO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SPECO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 export VERL_ROOT
 export PYTHONPATH="${VERL_ROOT}:${SPECO_ROOT}:${PYTHONPATH:-}"
@@ -100,7 +108,7 @@ mkdir -p "${DRAFTER_CKPT_DIR}"
 # checkpoint.save_contents 含 hf_model：SFT 模型同时保存为 HF 格式
 #   （在 ${CKPTS_DIR}/global_step_XXX/huggingface/），便于后续评估脚本直接加载。
 PYTHONUNBUFFERED=1 python3 "${SPECO_ROOT}/verl_speco/run_sft_co_train.py" \
-    experiment_type=cotrain \
+    experiment_type=${EXPERIMENT_TYPE} \
     actor_rollout_ref.rollout.drafter.speculative_algorithm=DSPARK \
     model.path=${MODEL_PATH} \
     data.train_files=${TRAIN_FILE} \
@@ -108,6 +116,7 @@ PYTHONUNBUFFERED=1 python3 "${SPECO_ROOT}/verl_speco/run_sft_co_train.py" \
     data.train_batch_size=${TRAIN_BATCH_SIZE} \
     data.micro_batch_size_per_gpu=${MICRO_BATCH_SIZE_PER_GPU} \
     data.max_token_len_per_gpu=${MAX_TOKEN_LEN_PER_GPU} \
+    data.ignore_input_ids_mismatch=${IGNORE_INPUT_IDS_MISMATCH} \
     optim.lr=${SFT_LR} \
     actor_rollout_ref.rollout.drafter.training.lr=${DRAFTER_LR} \
     actor_rollout_ref.rollout.drafter.training.lr_warmup_steps=0 \
@@ -123,13 +132,10 @@ PYTHONUNBUFFERED=1 python3 "${SPECO_ROOT}/verl_speco/run_sft_co_train.py" \
     trainer.experiment_name=${exp_name} \
     trainer.default_local_dir=${CKPTS_DIR} \
     checkpoint.save_contents=["model","optimizer","extra","hf_model"] \
-    speco.sft_specific.enable_drafter_training=true \
     speco.sft_specific.checkpoint_save_dir=${DRAFTER_CKPT_DIR} \
     speco.sft_specific.drafter_train_interval=${DRAFTER_TRAIN_INTERVAL} \
-    actor_rollout_ref.rollout.drafter.model_path=${DRAFTER_PATH} \
-    actor_rollout_ref.rollout.drafter.checkpoint_path=${DRAFTER_CKPT_DIR} \
+    ${DRAFTER_PATH_ARG} \
     actor_rollout_ref.rollout.drafter.training.step=${DRAFTER_TRAINING_STEPS} \
-    actor_rollout_ref.rollout.drafter.training.total_training_steps=${DRAFTER_TRAINING_STEPS} \
     actor_rollout_ref.rollout.drafter.training.dspark_block_size=${DSPARK_BLOCK_SIZE} \
     actor_rollout_ref.rollout.drafter.training.dspark_num_anchors=${DSPARK_NUM_ANCHORS} \
     actor_rollout_ref.rollout.drafter.training.dspark_num_target_layers=${DSPARK_NUM_TARGET_LAYERS} \

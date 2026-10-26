@@ -30,16 +30,19 @@ if VERL_ROOT not in sys.path:
 if SPECO_ROOT not in sys.path:
     sys.path.insert(0, SPECO_ROOT)
 
-print(f"[DEBUG] VERL_ROOT = {VERL_ROOT}")
-print(f"[DEBUG] SPECO_ROOT = {SPECO_ROOT}")
-print(f"[DEBUG] sys.path[:3] = {sys.path[:3]}")
+_sft_debug = os.environ.get("SFT_DEBUG", "").lower() in ("1", "true", "yes")
+if _sft_debug:
+    print(f"[DEBUG] VERL_ROOT = {VERL_ROOT}")
+    print(f"[DEBUG] SPECO_ROOT = {SPECO_ROOT}")
+    print(f"[DEBUG] sys.path[:3] = {sys.path[:3]}")
 
 # verl config 目录
 VERL_CONFIG_DIR = os.path.join(VERL_ROOT, "verl", "trainer", "config")
 # speco config 目录
 SPECO_CONFIG_DIR = os.path.join(SPECO_ROOT, "verl_speco", "config")
-print(f"[DEBUG] VERL_CONFIG_DIR = {VERL_CONFIG_DIR}")
-print(f"[DEBUG] exists: {os.path.exists(VERL_CONFIG_DIR)}")
+if _sft_debug:
+    print(f"[DEBUG] VERL_CONFIG_DIR = {VERL_CONFIG_DIR}")
+    print(f"[DEBUG] exists: {os.path.exists(VERL_CONFIG_DIR)}")
 
 
 @hydra.main(
@@ -94,7 +97,10 @@ def main(config):
     config.data.train_files = os.path.expanduser(config.data.get("train_files") or "")
     config.data.val_files = os.path.expanduser(config.data.get("val_files") or "")
     config.data.train_max_samples = config.data.get("train_max_samples") or -1
-    config.data.ignore_input_ids_mismatch = True
+    _ignore_mismatch = config.data.get("ignore_input_ids_mismatch", True)
+    config.data.ignore_input_ids_mismatch = (
+        True if _ignore_mismatch is None else bool(_ignore_mismatch)
+    )
     config.data.num_workers = config.data.get("num_workers") or 0
 
     # ========== 训练配置 ==========
@@ -109,7 +115,7 @@ def main(config):
     config.trainer.total_epochs = config.trainer.get("total_epochs") or 1
     config.trainer.n_gpus_per_node = config.trainer.get("n_gpus_per_node") or 1
     config.trainer.nnodes = config.trainer.get("nnodes") or 1
-    config.trainer.balance_batch = False
+    config.trainer.balance_batch = config.trainer.get("balance_batch", False)
     config.trainer.resume_mode = config.trainer.get("resume_mode") or "disable"
 
     # ========== 保存/测试配置 ==========
@@ -125,14 +131,16 @@ def main(config):
     )
 
     # ========== 数据格式配置 ==========
-    config.model.use_remove_padding = True
-    config.data.pad_mode = "no_padding"
+    config.model.use_remove_padding = config.model.get("use_remove_padding", True)
+    config.data.pad_mode = config.data.get("pad_mode", "no_padding")
 
     # ========== 显存优化配置（腾出 GPU 空间给 Drafter）==========
-    config.engine.param_offload = True
-    config.engine.optimizer_offload = True
-    config.engine.offload_policy = True
-    config.model.enable_activation_offload = True
+    config.engine.param_offload = config.engine.get("param_offload", True)
+    config.engine.optimizer_offload = config.engine.get("optimizer_offload", True)
+    config.engine.offload_policy = config.engine.get("offload_policy", True)
+    config.model.enable_activation_offload = config.model.get(
+        "enable_activation_offload", True
+    )
 
     # ========== 实验类型 & 算法 ==========
     experiment_type = config.get("experiment_type", "cotrain")
@@ -199,8 +207,18 @@ def main(config):
         config.rollout.drafter.enable_drafter_training = _enable_drafter
         config.rollout.drafter.speculative_algorithm = speculative_algorithm
         config.rollout.drafter.checkpoint_path = _drafter_ckpt_dir
-        if not config.rollout.drafter.get("model_path"):
+        # Treat empty string and /path/to/* placeholder as unconfigured
+        _raw_model_path = str(config.rollout.drafter.get("model_path") or "")
+        if not _raw_model_path or _raw_model_path.startswith("/path/to/"):
             config.rollout.drafter.model_path = ""
+
+    # Validate drafter model path when drafter training is enabled
+    if _enable_drafter and not config.rollout.drafter.get("model_path"):
+        raise ValueError(
+            "Drafter training is enabled (experiment_type=cotrain) but "
+            "rollout.drafter.model_path is empty or a /path/to/ placeholder. "
+            "Please set DRAFTER_MODEL_PATH in the shell script."
+        )
 
     # ========== drafter.training 配置 ==========
     with open_dict(config.rollout.drafter.training):
@@ -355,11 +373,6 @@ def main(config):
         config=config,
         speco_worker_cls=speco_worker_cls,
     )
-
-    print("\nVerifying methods:")
-    methods = ["fit", "_speco_fit_with_hooks", "_speco_build_sft_collect_plan"]
-    for m in methods:
-        print(f"  - {m}: {'✅' if hasattr(trainer, m) else '❌'}")
 
     print("\n" + "=" * 60)
     print("Starting SFT co-train...")
