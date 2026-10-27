@@ -17,7 +17,8 @@
 SpeCo examples intentionally expose both the drafter backend and rollout
 backend in the filename because those combinations are the product surface:
 
-    run_<model>_[actor_<actor-backend>_]drafter_<drafter-backend>_<rollout-backend>[_npu].sh
+    run_<model>_[actor_<actor-backend>_]drafter_<drafter-backend>_\
+      [colocate_async|separate_async_]<rollout-backend>[_npu].sh
 
 The standalone/offline draft-training entry point uses:
 
