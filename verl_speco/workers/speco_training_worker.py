@@ -361,8 +361,6 @@ class SpecoTrainingWorker(TrainingWorker):
         except Exception as e:
             import traceback
 
-            logger.error(
-                f"[SpecoTrainingWorker] export_lm_head_weight: ERROR {e}"
-            )
+            logger.error(f"[SpecoTrainingWorker] export_lm_head_weight: ERROR {e}")
             traceback.print_exc()
             return None

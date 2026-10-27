@@ -133,7 +133,11 @@ def check_filename(path: Path, display: str | None = None) -> list[str]:
             )
         return errors
 
-    suffix = spec_tokens[-1] if spec_tokens and spec_tokens[-1] in OPTIONAL_SUFFIXES else None
+    suffix = (
+        spec_tokens[-1]
+        if spec_tokens and spec_tokens[-1] in OPTIONAL_SUFFIXES
+        else None
+    )
     core_tokens = spec_tokens[:-1] if suffix is not None else spec_tokens
     if (
         len(core_tokens) == 3

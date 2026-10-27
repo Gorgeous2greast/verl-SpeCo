@@ -1687,9 +1687,7 @@ class SpecoRaySFTRayTrainer(SFTTrainer):
                                     )
                                 )
                                 _synced = True
-                                logger.info(
-                                    f"[LM-HEAD-SYNC] Sync OK: {_sync_result}"
-                                )
+                                logger.info(f"[LM-HEAD-SYNC] Sync OK: {_sync_result}")
                             else:
                                 logger.error(
                                     f"[LM-HEAD-SYNC] Step {global_step}: Export returned None even on rank0 — lm_head sync FAILED. "

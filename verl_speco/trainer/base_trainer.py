@@ -4910,7 +4910,8 @@ class DrafterBaseTrainer:
             self.backend.model_type == "dspark"
             and float(
                 self.config.rollout.drafter.training.get("dspark_l1_loss_alpha", 0.0)
-            ) > 0
+            )
+            > 0
         )
         same_step_target_head_required = (
             (self.backend.model_type == "eagle3" or dspark_uses_last_hidden)
@@ -4968,6 +4969,7 @@ class DrafterBaseTrainer:
                 available_data = self.data_buffer.get_data_from_last_n_steps(
                     buffer_steps
                 )
+            # Filter out items that are already in the active accumulation set, if any.
             if len(available_data) < effective_batch_size:
                 if len(available_data) >= min_items_for_batch:
                     items = available_data
@@ -6362,7 +6364,8 @@ class DrafterBaseTrainer:
             self.backend.model_type == "dspark"
             and float(
                 self.config.rollout.drafter.training.get("dspark_l1_loss_alpha", 0.0)
-            ) > 0
+            )
+            > 0
         )
         same_step_data_required = (
             (self.backend.model_type == "eagle3" or dspark_uses_last_hidden)

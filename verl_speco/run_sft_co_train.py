@@ -393,5 +393,3 @@ def main(config):
 
 if __name__ == "__main__":
     main()
-
-# export PYTHONPATH="/model/sft_cotrain/verl:/model/sft_cotrain/verl-SpeCo:$PYTHONPATH"
